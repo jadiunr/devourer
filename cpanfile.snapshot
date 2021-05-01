@@ -105,10 +105,10 @@ DISTRIBUTIONS
       ExtUtils::MakeMaker 0
       strict 0
       vars 0
-  Cpanel-JSON-XS-4.25
-    pathname: R/RU/RURBAN/Cpanel-JSON-XS-4.25.tar.gz
+  Cpanel-JSON-XS-4.26
+    pathname: R/RU/RURBAN/Cpanel-JSON-XS-4.26.tar.gz
     provides:
-      Cpanel::JSON::XS 4.25
+      Cpanel::JSON::XS 4.26
       Cpanel::JSON::XS::Type undef
     requirements:
       Carp 0
@@ -782,24 +782,6 @@ DISTRIBUTIONS
     requirements:
       ExtUtils::MakeMaker 0
       perl 5.008001
-  Parallel-ForkManager-2.02
-    pathname: Y/YA/YANICK/Parallel-ForkManager-2.02.tar.gz
-    provides:
-      Parallel::ForkManager 2.02
-      Parallel::ForkManager::Child 2.02
-    requirements:
-      Carp 0
-      ExtUtils::MakeMaker 0
-      File::Path 0
-      File::Spec 0
-      File::Temp 0
-      Moo 0
-      Moo::Role 0
-      POSIX 0
-      Storable 0
-      perl 5.006
-      strict 0
-      warnings 0
   Params-Util-1.102
     pathname: R/RE/REHSACK/Params-Util-1.102.tar.gz
     provides:
@@ -980,13 +962,13 @@ DISTRIBUTIONS
       perl 5.006
       strict 0
       warnings 0
-  Term-ReadLine-Gnu-1.40
-    pathname: H/HA/HAYASHI/Term-ReadLine-Gnu-1.40.tar.gz
+  Term-ReadLine-Gnu-1.41
+    pathname: H/HA/HAYASHI/Term-ReadLine-Gnu-1.41.tar.gz
     provides:
-      Term::ReadLine::Gnu 1.40
-      Term::ReadLine::Gnu::AU 1.40
-      Term::ReadLine::Gnu::Var 1.40
-      Term::ReadLine::Gnu::XS 1.40
+      Term::ReadLine::Gnu 1.41
+      Term::ReadLine::Gnu::AU 1.41
+      Term::ReadLine::Gnu::Var 1.41
+      Term::ReadLine::Gnu::XS 1.41
     requirements:
       ExtUtils::MakeMaker 0
       perl 5.008001

@@ -8,10 +8,3 @@ services:
       - .:/app
     stdin_open: true
     tty: true
-    depends_on:
-    - selenium
-  selenium:
-    image: selenium/standalone-firefox:latest
-    environment:
-      TZ: Asia/Tokyo
-    volumes: [/dev/shm:/dev/shm]
