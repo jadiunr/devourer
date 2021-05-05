@@ -1,4 +1,4 @@
-package Devourer::CLI::fetch::twitter;
+package Devourer::CLI::fetch::twuser;
 use Moo;
 use utf8;
 use feature 'say';
@@ -30,29 +30,17 @@ has saved_files => (is => 'ro', lazy => 1, default => sub {
 sub run {
     my $self = shift;
 
-    my $mediators = $self->settings->{mediators};
+    my $user = 'xxxx';
     my $all_statuses = [];
 
-    {
-        my $max_id;
-        for my $iter (1..4) {
-            my $timeline;
-            $timeline = $self->twitter->home_timeline({count => 200}) if !defined($max_id);
-            $timeline = $self->twitter->home_timeline({count => 200, max_id => $max_id}) if defined($max_id);
-            push(@$all_statuses, @$timeline);
-            $max_id = $timeline->[-1]{id};
-        }
-    }
-
-    for my $mediator (@$mediators) {
-        my $max_id;
-        for my $iter (1..5) {
-            my $favorites;
-            $favorites = $self->twitter->favorites({screen_name => $mediator, count => 200}) if !defined($max_id);
-            $favorites = $self->twitter->favorites({screen_name => $mediator, count => 200, max_id => $max_id}) if defined($max_id);
-            push(@$all_statuses, @$favorites);
-            $max_id = $favorites->[-1]{id};
-        }
+    my $max_id;
+    for my $iter (1..16) {
+        my $statuses;
+        $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200}) if !defined($max_id);
+        $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200, max_id => $max_id}) if defined($max_id);
+        push(@$all_statuses, @$statuses);
+        $max_id = $statuses->[-1]{id};
+        last if scalar(@$statuses) < 200;
     }
 
     my %tmp;
