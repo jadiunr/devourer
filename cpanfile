@@ -5,3 +5,4 @@ requires 'Term::ReadLine::Gnu';
 requires 'Pry';
 requires 'Net::OAuth';
 requires 'Furl';
+requires 'Getopt::Compact';

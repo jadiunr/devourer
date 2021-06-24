@@ -2,6 +2,7 @@ package Devourer::CLI::fetch::twitter;
 use Moo;
 use utf8;
 use feature 'say';
+use Getopt::Compact;
 use Time::Piece;
 use File::Basename 'basename';
 use File::Path 'mkpath';
@@ -26,8 +27,44 @@ has saved_files => (is => 'ro', lazy => 1, default => sub {
     my $self = shift;
     [map {basename($_)} (split /\n/, `find @{[$self->settings->{outdir}]} -type f`)];
 });
+has saved_statuses => (is => 'ro', lazy => 1, default => sub {
+    my $self = shift;
+    my $statuses = [map {(split '-', basename($_))[0]} (split /\n/, `find @{[$self->settings->{outdir}]} -type d -name all -prune -o -type f -a -mtime -30 -print`)];
+    $statuses = [grep {$_ =~ /^\d+$/} @$statuses];
+    return [sort {$b <=> $a} @$statuses];
+});
+has opts => (is => 'ro', default => sub {
+    Getopt::Compact->new(
+        name => 'devourer fetch twitter',
+        struct => [
+            [[qw(u user)], qq(fetch specified target user's post), ':s'],
+            [[qw(fav)], qq(fetch user's favorites instead of post)],
+            [[qw(d devour)], qq(JUST DEVOUR!)]
+        ]
+    )->opts;
+});
 
 sub run {
+    my $self = shift;
+
+    if (scalar(keys %{$self->opts}) == scalar(grep { !defined $_ } values(%{$self->opts}))) {
+        $self->_standard_fetch();
+        exit;
+    }
+
+    if ($self->opts->{user}) {
+        my $splitted_users = [split /,/, $self->opts->{user}];
+        $self->_fetch_from_users($splitted_users);
+        exit;
+    }
+
+    if ($self->opts->{devour}) {
+        $self->_devour();
+        exit;
+    }
+}
+
+sub _standard_fetch {
     my $self = shift;
 
     my $mediators = $self->settings->{mediators};
@@ -72,6 +109,72 @@ sub run {
     say Dumper $rate_limit_status->{favorites};
     say Dumper $rate_limit_status->{statuses}{'/statuses/home_timeline'};
     say Dumper $rate_limit_status->{statuses}{'/statuses/user_timeline'};
+}
+
+sub _fetch_from_users {
+    my ($self, $users) = @_;
+
+    my $all_statuses = [];
+
+    for my $user (@$users) {
+        my $max_id;
+        for my $iter (1..16) {
+            my $statuses;
+            $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200}) if !defined($max_id);
+            $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200, max_id => $max_id}) if defined($max_id);
+            push(@$all_statuses, @$statuses);
+            $max_id = $statuses->[-1]{id};
+            last if scalar(@$statuses) < 200;
+        }
+
+        my %tmp;
+        my $unique_statuses = [grep {!$tmp{$_->{id}}++} @$all_statuses];
+        my $sorted_statuses = [sort {
+            Time::Piece->strptime($a->{created_at}, '%a %b %d %T %z %Y')
+            <=>
+            Time::Piece->strptime($b->{created_at}, '%a %b %d %T %z %Y')
+        } @$unique_statuses];
+
+        for my $status (@$sorted_statuses) {
+            my $media_array = $status->{extended_entities}{media};
+            $self->download($media_array, $status->{id}) if $media_array;
+        }
+
+        my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
+        say Dumper $rate_limit_status->{favorites};
+        say Dumper $rate_limit_status->{statuses}{'/statuses/home_timeline'};
+        say Dumper $rate_limit_status->{statuses}{'/statuses/user_timeline'};
+    }
+}
+
+sub _devour {
+    my $self = shift;
+
+    for my $status (@{$self->saved_statuses}) {
+        my $user_id = eval { $self->twitter->show_status($status)->{user}{id} };
+        warn "$@: $status" and next if $@;
+        
+        my $max_id;
+        for my $iter (1..16) {
+            my $user_statuses;
+            $user_statuses = $self->twitter->user_timeline({user_id => $user_id, count => 200}) if !defined($max_id);
+            $user_statuses = $self->twitter->user_timeline({user_id => $user_id, count => 200, max_id => $max_id}) if defined($max_id);
+            
+            for my $user_status (@$user_statuses) {
+                my $media_array = $user_status->{extended_entities}{media};
+                $self->download($media_array, $user_status->{id}) if $media_array;
+            }
+
+            my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
+            my $user_timeline_limit = $rate_limit_status->{statuses}{'/statuses/user_timeline'};
+            my $show_statuses_limit = $rate_limit_status->{statuses}{'/statuses/show/:id'};
+
+            say "user_timeline limit: ". $user_timeline_limit->{remaining}. "/". $user_timeline_limit->{limit};
+            say "show_statuses_limit: ". $show_statuses_limit->{remaining}. "/". $show_statuses_limit->{limit};
+
+            last if scalar(@$user_statuses) < 200;
+        }
+    }
 }
 
 sub download {
