@@ -74,7 +74,7 @@ sub _standard_fetch {
     push(@$all_statuses, @$timeline);
 
     for my $mediator (@$mediators) {
-        my $favorites = $self->_get_favorites();
+        my $favorites = $self->_get_favorites($mediator);
         push(@$all_statuses, @$favorites);
     }
 
@@ -113,7 +113,7 @@ sub _fetch_from_users {
 sub _devour {
     my $self = shift;
 
-    for my $status (@{$self->saved_statuses}) {
+    for my $status (@{$self->favorited_statuses}) {
         my $user_id = eval { $self->twitter->show_status($status)->{user}{id} };
         warn "$@: $status" and next if $@;
         
