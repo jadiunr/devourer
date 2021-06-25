@@ -135,6 +135,7 @@ sub _devour {
             say "user_timeline limit: ". $user_timeline_limit->{remaining}. "/". $user_timeline_limit->{limit};
             say "show_statuses_limit: ". $show_statuses_limit->{remaining}. "/". $show_statuses_limit->{limit};
 
+            $max_id = $user_statuses->[-1]{id};
             last if scalar(@$user_statuses) < 200;
         }
     }
@@ -161,7 +162,7 @@ sub _get_favorites {
 
     my $all_statuses;
     my $max_id;
-    for my $iter (1..5) {
+    for my $iter (1..4) {
         my $favorites;
         $favorites = $self->twitter->favorites({screen_name => $user, count => 200}) if !defined($max_id);
         $favorites = $self->twitter->favorites({screen_name => $user, count => 200, max_id => $max_id}) if defined($max_id);
