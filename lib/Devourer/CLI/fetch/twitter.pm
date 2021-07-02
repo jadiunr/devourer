@@ -116,13 +116,13 @@ sub _devour {
     for my $status (@{$self->favorited_statuses}) {
         my $user_id = eval { $self->twitter->show_status($status)->{user}{id} };
         warn "$@: $status" and next if $@;
-        
+
         my $max_id;
         for my $iter (1..16) {
             my $user_statuses;
             $user_statuses = $self->twitter->user_timeline({user_id => $user_id, count => 200}) if !defined($max_id);
             $user_statuses = $self->twitter->user_timeline({user_id => $user_id, count => 200, max_id => $max_id}) if defined($max_id);
-            
+
             for my $user_status (@$user_statuses) {
                 my $media_array = $user_status->{extended_entities}{media};
                 $self->_download($media_array, $user_status->{id}) if $media_array;
@@ -218,7 +218,7 @@ sub _download {
 
         my $filename = $status_id."-".basename($url);
 
-        if (grep {$filename eq $_} @{$self->saved_files} or -f "@{[$self->settings->{outdir}]}/searching/$filename") {
+        if (grep {$filename eq $_} @{$self->saved_files}) {
             say "[@{[ localtime->datetime ]}]Already saved     : $filename";
             return;
         }
@@ -232,7 +232,7 @@ sub _download {
             my $url = $image->{media_url};
 
             my $filename = $status_id."-".basename($url);
-            if (grep {$filename eq $_} @{$self->saved_files} or -f "@{[$self->settings->{outdir}]}/searching/$filename") {
+            if (grep {$filename eq $_} @{$self->saved_files}) {
                 say "[@{[ localtime->datetime ]}]Already saved     : $filename";
                 return;
             }
@@ -247,11 +247,20 @@ sub _download {
 
 sub _save {
   my ($self, $filename, $binary) = @_;
+  my $now = localtime;
+  my ($year, $month, $day) = ($now->year, $now->strftime('%m'), $now->strftime('%d'));
 
-  open my $fh, ">", "./@{[$self->settings->{outdir}]}/searching/$filename"
+  mkdir "./@{[$self->settings->{outdir}]}/searching/$year" unless -d "./@{[$self->settings->{outdir}]}/searching/$year";
+  mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month" unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month";
+  mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day" unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day";
+
+  open my $fh, ">", "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day/$filename"
     or die "[@{[ localtime->datetime ]}]Cannot create file: $!, filename: ".$filename;
   say $fh $binary->content;
   close $fh;
+
+  push(@{ $self->saved_files }, $filename);
+
   say "[@{[ localtime->datetime ]}]Image saved       : $filename";
 }
 
