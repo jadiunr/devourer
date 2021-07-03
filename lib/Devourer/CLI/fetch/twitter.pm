@@ -128,8 +128,23 @@ sub _fetch_from_lists {
             $self->_download($media_array, $status->{id}) if $media_array;
         }
 
+        my $users = $self->_extract_user_screen_names($sorted_statuses);
+
+        for my $user (@$users) {
+            my $user_timeline = $self->_get_user_timeline($user);
+
+            for my $status (@$user_timeline) {
+                my $media_array = $status->{extended_entities}{media};
+                $self->_download($media_array, $status->{id}) if $media_array;
+            }
+
+            my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
+            say Dumper $rate_limit_status->{statuses}{'/statuses/user_timeline'};
+        }
+
         my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
-        say Dumper $rate_limit_status->{'/lists/statuses'};
+        say Dumper $rate_limit_status->{lists}{'/lists/statuses'};
+        say Dumper $rate_limit_status->{statuses}{'/statuses/user_timeline'};
     }
 }
 
@@ -237,6 +252,16 @@ sub _sort_and_uniq_statuses {
     } @$unique_statuses];
 
     return $sorted_statuses;
+}
+
+sub _extract_user_screen_names {
+    my ($self, $statuses) = @_;
+
+    my %tmp;
+    my $user_screen_names = [map {$_->{user}{screen_name}} @$statuses];
+    my $unique_user_screen_names = [grep {!$tmp{$_}++} @$user_screen_names];
+
+    return $unique_user_screen_names;
 }
 
 sub _download {
