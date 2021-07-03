@@ -38,7 +38,8 @@ has opts => (is => 'ro', default => sub {
         name => 'devourer fetch twitter',
         struct => [
             [[qw(u user)], qq(fetch specified target user's post), ':s'],
-            [[qw(fav)], qq(fetch user's favorites instead of post)],
+            [[qw(l list)], qq(fetch specified target list's post), ':s'],
+            [[qw(f fav)], qq(fetch user's favorites instead of post)],
             [[qw(d devour)], qq(JUST DEVOUR!)]
         ]
     )->opts;
@@ -55,6 +56,12 @@ sub run {
     if ($self->opts->{user}) {
         my $splitted_users = [split /,/, $self->opts->{user}];
         $self->_fetch_from_users($splitted_users);
+        exit;
+    }
+
+    if ($self->opts->{list}) {
+        my $splitted_lists = [split /,/, $self->opts->{list}];
+        $self->_fetch_from_lists($splitted_lists);
         exit;
     }
 
@@ -105,8 +112,24 @@ sub _fetch_from_users {
 
         my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
         say Dumper $rate_limit_status->{favorites};
-        say Dumper $rate_limit_status->{statuses}{'/statuses/home_timeline'};
         say Dumper $rate_limit_status->{statuses}{'/statuses/user_timeline'};
+    }
+}
+
+sub _fetch_from_lists {
+    my ($self, $lists) = @_;
+
+    for my $list_id (@$lists) {
+        my $statuses = $self->_get_list_statuses($list_id);
+        my $sorted_statuses = $self->_sort_and_uniq_statuses($statuses);
+
+        for my $status (@$sorted_statuses) {
+            my $media_array = $status->{extended_entities}{media};
+            $self->_download($media_array, $status->{id}) if $media_array;
+        }
+
+        my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
+        say Dumper $rate_limit_status->{'/lists/statuses'};
     }
 }
 
@@ -148,8 +171,7 @@ sub _get_home_timeline {
     my $max_id;
     for my $iter (1..4) {
         my $timeline;
-        $timeline = $self->twitter->home_timeline({count => 200}) if !defined($max_id);
-        $timeline = $self->twitter->home_timeline({count => 200, max_id => $max_id}) if defined($max_id);
+        $timeline = $self->twitter->home_timeline({count => 200, defined($max_id) ? (max_id => $max_id) : ()});
         push(@$all_statuses, @$timeline);
         $max_id = $timeline->[-1]{id};
     }
@@ -164,8 +186,7 @@ sub _get_favorites {
     my $max_id;
     for my $iter (1..4) {
         my $favorites;
-        $favorites = $self->twitter->favorites({screen_name => $user, count => 200}) if !defined($max_id);
-        $favorites = $self->twitter->favorites({screen_name => $user, count => 200, max_id => $max_id}) if defined($max_id);
+        $favorites = $self->twitter->favorites({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
         push(@$all_statuses, @$favorites);
         $max_id = $favorites->[-1]{id};
     }
@@ -180,11 +201,25 @@ sub _get_user_timeline {
     my $max_id;
     for my $iter (1..16) {
         my $statuses;
-        $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200}) if !defined($max_id);
-        $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200, max_id => $max_id}) if defined($max_id);
+        $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
         push(@$all_statuses, @$statuses);
         $max_id = $statuses->[-1]{id};
         last if scalar(@$statuses) < 200;
+    }
+
+    return $all_statuses;
+}
+
+sub _get_list_statuses {
+    my ($self, $list_id) = @_;
+
+    my $all_statuses;
+    my $max_id;
+    for my $iter (1..4) {
+        my $statuses;
+        $statuses = $self->twitter->list_statuses({list_id => $list_id, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
+        push(@$all_statuses, @$statuses);
+        $max_id = $statuses->[-1]{id};
     }
 
     return $all_statuses;
