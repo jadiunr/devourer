@@ -217,9 +217,9 @@ sub _get_user_timeline {
     for my $iter (1..16) {
         my $statuses;
         $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
+        last if scalar(@$statuses) <= 1;
         push(@$all_statuses, @$statuses);
         $max_id = $statuses->[-1]{id};
-        last if scalar(@$statuses) < 200;
     }
 
     return $all_statuses;
