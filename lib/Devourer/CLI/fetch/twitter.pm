@@ -334,13 +334,13 @@ sub _download {
     my $self = shift;
     my $media_urls = shift;
     my $pm = Parallel::ForkManager->new(12);
+    my $filenames = [sort keys %$media_urls];
 
-    while (my $filename_slice = [splice @{[sort keys %$media_urls]}, 0, 12]) {
+    while (my $filename_slice = [splice @$filenames, 0, 12]) {
         my $binaries = {};
         $pm->run_on_finish(sub {
             my $code = $_[1];
             $binaries->{$_[5]->[0]} = $_[5]->[1] if $code == 0;
-            delete($media_urls->{$_[5]->[0]});
         });
         for my $filename (@$filename_slice) {
             $pm->start and next;
@@ -356,7 +356,7 @@ sub _download {
         }
         $pm->wait_all_children;
         $self->_store($binaries);
-        last unless %$media_urls;
+        last unless @$filenames;
     }
 }
 
