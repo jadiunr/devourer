@@ -32,6 +32,7 @@ has favorited_statuses => (is => 'ro', lazy => 1, default => sub {
     my $self = shift;
     my $statuses = [map {(split '-', basename($_))[0]} (split /\n/, `find @{[$self->settings->{outdir}]}/favorited -type f -a -mtime -30 -print`)];
     $statuses = [grep {$_ =~ /^\d+$/} @$statuses];
+
     return [sort {$b <=> $a} @$statuses];
 });
 has opts => (is => 'ro', default => sub {
@@ -91,7 +92,7 @@ sub _standard_fetch {
 
     for my $list (@$lists) {
         my $users = $self->_get_list_users($list);
-        while (my $users_slice = [splice @$users, 0, 12]) {
+        while (my $users_slice = [splice @$users, 0, 8]) {
             $statuses = $self->_get_user_timelines($users_slice);
             $media_urls = $self->_extract_file_name_and_url($statuses);
             $binaries = $self->_download($media_urls);
@@ -231,7 +232,7 @@ sub _get_user_timeline {
 
 sub _get_user_timelines {
     my ($self, $users_slice) = @_;
-    my $pm = Parallel::ForkManager->new(12);
+    my $pm = Parallel::ForkManager->new(8);
     my $users_timeline;
     $pm->run_on_finish(sub {
         my $code = $_[1];
@@ -333,10 +334,10 @@ sub _extract_file_name_and_url {
 sub _download {
     my $self = shift;
     my $media_urls = shift;
-    my $pm = Parallel::ForkManager->new(12);
+    my $pm = Parallel::ForkManager->new(8);
     my $filenames = [sort keys %$media_urls];
 
-    while (my $filename_slice = [splice @$filenames, 0, 12]) {
+    while (my $filename_slice = [splice @$filenames, 0, 8]) {
         my $binaries = {};
         $pm->run_on_finish(sub {
             my $code = $_[1];
