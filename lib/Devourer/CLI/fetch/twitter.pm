@@ -230,9 +230,10 @@ sub _get_list_statuses {
 
     my $all_statuses;
     my $max_id;
-    for my $iter (1..4) {
+    for my $iter (1..16) {
         my $statuses;
         $statuses = $self->twitter->list_statuses({list_id => $list_id, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
+        last if scalar(@$statuses) <= 1;
         push(@$all_statuses, @$statuses);
         $max_id = $statuses->[-1]{id};
     }
