@@ -9,6 +9,7 @@ use File::Path 'mkpath';
 use Twitter::API;
 use YAML::Tiny;
 use Furl;
+use Parallel::ForkManager;
 use Data::Dumper;
 
 has settings => (is => 'ro', default => sub { YAML::Tiny->read('./settings.yml')->[0]; });
@@ -75,27 +76,28 @@ sub _standard_fetch {
     my $self = shift;
 
     my $mediators = $self->settings->{mediators};
-    my $all_statuses;
+    my $lists = $self->settings->{lists};
+    my ($statuses, $media_urls, $binaries);
 
-    my $timeline = $self->_get_home_timeline();
-    push(@$all_statuses, @$timeline);
+    $statuses = $self->_get_home_timeline();
+    $media_urls = $self->_extract_file_name_and_url($statuses);
+    $binaries = $self->_download($media_urls);
 
     for my $mediator (@$mediators) {
-        my $favorites = $self->_get_favorites($mediator);
-        push(@$all_statuses, @$favorites);
+        $statuses = $self->_get_user_favorites($mediator);
+        $media_urls = $self->_extract_file_name_and_url($statuses);
+        $binaries = $self->_download($media_urls);
     }
 
-    my $sorted_statuses = $self->_sort_and_uniq_statuses($all_statuses);
-
-    for my $status (@$sorted_statuses) {
-        my $media_array = $status->{extended_entities}{media};
-        $self->_download($media_array, $status->{id}) if $media_array;
+    for my $list (@$lists) {
+        my $users = $self->_get_list_users($list);
+        while (my $users_slice = [splice @$users, 0, 12]) {
+            $statuses = $self->_get_user_timelines($users_slice);
+            $media_urls = $self->_extract_file_name_and_url($statuses);
+            $binaries = $self->_download($media_urls);
+            last unless @$users;
+        }
     }
-
-    my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
-    say Dumper $rate_limit_status->{favorites};
-    say Dumper $rate_limit_status->{statuses}{'/statuses/home_timeline'};
-    say Dumper $rate_limit_status->{statuses}{'/statuses/user_timeline'};
 }
 
 sub _fetch_from_users {
@@ -181,29 +183,31 @@ sub _devour {
 
 sub _get_home_timeline {
     my $self = shift;
-
-    my $all_statuses;
+    my $all_statuses = [];
     my $max_id;
+
     for my $iter (1..4) {
-        my $timeline;
-        $timeline = $self->twitter->home_timeline({count => 200, defined($max_id) ? (max_id => $max_id) : ()});
-        push(@$all_statuses, @$timeline);
-        $max_id = $timeline->[-1]{id};
+        my $statuses = $self->twitter->home_timeline({count => 200, defined($max_id) ? (max_id => $max_id) : ()});
+        last if scalar(@$statuses) <= 1;
+        push(@$all_statuses, @$statuses);
+        $max_id = $statuses->[-1]{id};
+        say "fetch tweets: ". scalar(@$statuses);
     }
 
     return $all_statuses;
 }
 
-sub _get_favorites {
+sub _get_user_favorites {
     my ($self, $user) = @_;
-
-    my $all_statuses;
+    my $all_statuses = [];
     my $max_id;
+
     for my $iter (1..4) {
-        my $favorites;
-        $favorites = $self->twitter->favorites({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
+        my $favorites = $self->twitter->favorites({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
+        last if scalar(@$favorites) <= 1;
         push(@$all_statuses, @$favorites);
         $max_id = $favorites->[-1]{id};
+        say "fetch tweets: ". scalar(@$favorites);
     }
 
     return $all_statuses;
@@ -223,6 +227,41 @@ sub _get_user_timeline {
     }
 
     return $all_statuses;
+}
+
+sub _get_user_timelines {
+    my ($self, $users_slice) = @_;
+    my $pm = Parallel::ForkManager->new(12);
+    my $users_timeline;
+    $pm->run_on_finish(sub {
+        my $code = $_[1];
+        my $all_statuses = $_[5];
+        push(@$users_timeline, @$all_statuses);
+    });
+    for my $user (@$users_slice) {
+        $pm->start and next;
+        my $all_statuses;
+        my $max_id;
+        for my $iter (1..16) {
+            my $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
+            last if scalar(@$statuses) <= 1;
+            push(@$all_statuses, @$statuses);
+            $max_id = $statuses->[-1]{id};
+        }
+        $pm->finish(0, $all_statuses);
+    }
+    $pm->wait_all_children;
+
+    return $users_timeline;
+}
+
+sub _get_list_users {
+    my ($self, $list) = @_;
+
+    my $members = $self->twitter->list_members({list_id => $list, count => 5000})->{users};
+    my $members_screen_name = [map { $_->{screen_name} } @$members];
+
+    return $members_screen_name;
 }
 
 sub _get_list_statuses {
@@ -265,64 +304,79 @@ sub _extract_user_screen_names {
     return $unique_user_screen_names;
 }
 
+sub _extract_file_name_and_url {
+    my ($self, $all_statuses) = @_;
+    my $media_info = {};
+    for my $status (@$all_statuses) {
+        my $media_array = $status->{extended_entities}{media};
+        next unless $media_array;
+        my $status_id = $media_array->[0]{source_status_id} ? $media_array->[0]{source_status_id} : $status->{id};
+        if ($media_array->[0]{video_info}) {
+            my $video = $media_array->[0]{video_info}{variants};
+            for (@$video) { $_->{bitrate} = 0 unless $_->{bitrate} }
+            my $url = (sort { $b->{bitrate} <=> $a->{bitrate} } @$video)[0]{url};
+            $url =~ s/\?.+//;
+            my $filename = $status_id."-".basename($url);
+            $media_info->{$filename} = $url;
+        } else {
+            for my $media (@$media_array) {
+                my $url = $media->{media_url};
+                my $filename = $status_id."-".basename($url);
+                $media_info->{$filename} = $url. '?name=orig';
+            }
+        }
+    }
+
+    return $media_info;
+}
+
 sub _download {
     my $self = shift;
-    my $media_array = shift;
-    my $status_id = $media_array->[0]{source_status_id} ? $media_array->[0]{source_status_id} : shift;
-    my $binary;
+    my $media_urls = shift;
+    my $pm = Parallel::ForkManager->new(12);
 
-    if($media_array->[0]{video_info}) {
-        my $video = $media_array->[0]{video_info}{variants};
-        for (@$video) { $_->{bitrate} = 0 unless $_->{bitrate} }
-        my $url = (sort { $b->{bitrate} <=> $a->{bitrate} } @$video)[0]{url};
-        $url =~ s/\?.+//;
-
-        my $filename = $status_id."-".basename($url);
-
-        if (grep {$filename eq $_} @{$self->saved_files}) {
-            say "[@{[ localtime->datetime ]}]Already saved     : $filename";
-            return;
-        }
-
-        $binary = $self->http->get($url);
-        warn "[@{[ localtime->datetime ]}]Cannot fetch video: returned " . $binary->code . ", url: $url" and return
-            if grep {$_ eq $binary->code} (404, 500);
-        $self->_save($filename, $binary);
-    } else {
-        for my $image (@$media_array) {
-            my $url = $image->{media_url};
-
-            my $filename = $status_id."-".basename($url);
+    while (my $filename_slice = [splice @{[sort keys %$media_urls]}, 0, 12]) {
+        my $binaries = {};
+        $pm->run_on_finish(sub {
+            my $code = $_[1];
+            $binaries->{$_[5]->[0]} = $_[5]->[1] if $code == 0;
+            delete($media_urls->{$_[5]->[0]});
+        });
+        for my $filename (@$filename_slice) {
+            $pm->start and next;
             if (grep {$filename eq $_} @{$self->saved_files}) {
                 say "[@{[ localtime->datetime ]}]Already saved     : $filename";
-                return;
+                $pm->finish(-1, [$filename, undef]);
             }
-
-            $binary = $self->http->get($url.'?name=orig');
-            warn "[@{[ localtime->datetime ]}]Cannot fetch image: returned " . $binary->code . ", url: $url" and next
-                if grep {$_ eq $binary->code} (404, 500);
-            $self->_save($filename, $binary);
+            my $res = $self->http->get($media_urls->{$filename});
+            warn "[@{[ localtime->datetime ]}]Cannot fetch video: returned ". $res->code. ", url: ". $media_urls->{$filename} and $pm->finish(-1, [$filename, undef])
+                if $res->code != 200;
+            say "[@{[ localtime->datetime ]}]Media downloaded!     : ". $media_urls->{$filename};
+            $pm->finish(0, [$filename, $res]);
         }
+        $pm->wait_all_children;
+        $self->_store($binaries);
+        last unless %$media_urls;
     }
 }
 
-sub _save {
-  my ($self, $filename, $binary) = @_;
-  my $now = localtime;
-  my ($year, $month, $day) = ($now->year, $now->strftime('%m'), $now->strftime('%d'));
+sub _store {
+    my ($self, $binaries) = @_;
+    my $now = localtime;
+    my ($year, $month, $day) = ($now->year, $now->strftime('%m'), $now->strftime('%d'));
 
-  mkdir "./@{[$self->settings->{outdir}]}/searching/$year" unless -d "./@{[$self->settings->{outdir}]}/searching/$year";
-  mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month" unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month";
-  mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day" unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day";
+    mkdir "./@{[$self->settings->{outdir}]}/searching/$year" unless -d "./@{[$self->settings->{outdir}]}/searching/$year";
+    mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month" unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month";
+    mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day" unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day";
 
-  open my $fh, ">", "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day/$filename"
-    or die "[@{[ localtime->datetime ]}]Cannot create file: $!, filename: ".$filename;
-  say $fh $binary->content;
-  close $fh;
-
-  push(@{ $self->saved_files }, $filename);
-
-  say "[@{[ localtime->datetime ]}]Image saved       : $filename";
+    for my $filename (@{[sort keys %$binaries]}) {
+        open my $fh, ">", "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day/$filename"
+            or die "[@{[ localtime->datetime ]}]Cannot create file: $!, filename: ".$filename;
+        say $fh $binaries->{$filename}->content;
+        close $fh;
+        push(@{ $self->saved_files }, $filename);
+        say "[@{[ localtime->datetime ]}]Image stored       : $filename";
+    }
 }
 
 1;
