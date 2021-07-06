@@ -84,16 +84,16 @@ sub _standard_fetch {
 
     my $mediators = $self->settings->{mediators};
     my $lists = $self->settings->{lists};
-    my ($statuses, $media_urls, $binaries);
+    my ($statuses, $media_urls);
 
     $statuses = $self->_get_home_timeline();
     $media_urls = $self->_extract_file_name_and_url($statuses);
-    $binaries = $self->_download($media_urls);
+    $self->_download($media_urls);
 
     for my $mediator (@$mediators) {
         $statuses = $self->_get_user_favorites($mediator);
         $media_urls = $self->_extract_file_name_and_url($statuses);
-        $binaries = $self->_download($media_urls);
+        $self->_download($media_urls);
     }
 
     for my $list (@$lists) {
@@ -101,7 +101,7 @@ sub _standard_fetch {
         while (my $users_slice = [splice @$users, 0, 8]) {
             $statuses = $self->_get_user_timelines($users_slice);
             $media_urls = $self->_extract_file_name_and_url($statuses);
-            $binaries = $self->_download($media_urls);
+            $self->_download($media_urls);
             last unless @$users;
         }
     }
