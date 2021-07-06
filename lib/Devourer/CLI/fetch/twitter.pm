@@ -10,6 +10,7 @@ use Twitter::API;
 use YAML::Tiny;
 use Furl;
 use Parallel::ForkManager;
+use Redis;
 use Data::Dumper;
 
 has settings => (is => 'ro', default => sub { YAML::Tiny->read('./settings.yml')->[0]; });
@@ -24,10 +25,7 @@ has twitter => (is => 'ro', lazy => 1, default => sub {
         access_token_secret => $self->settings->{twitter}{access_token_secret}
     );
 });
-has saved_files => (is => 'ro', lazy => 1, default => sub {
-    my $self = shift;
-    [map {basename($_)} (split /\n/, `find @{[$self->settings->{outdir}]} -type f`)];
-});
+has redis => (is => 'ro', default => sub { Redis->new(server => 'redis:6379'); });
 has favorited_statuses => (is => 'ro', lazy => 1, default => sub {
     my $self = shift;
     my $statuses = [map {(split '-', basename($_))[0]} (split /\n/, `find @{[$self->settings->{outdir}]}/favorited -type f -a -mtime -30 -print`)];
@@ -42,7 +40,8 @@ has opts => (is => 'ro', default => sub {
             [[qw(u user)], qq(fetch specified target user's post), ':s'],
             [[qw(l list)], qq(fetch specified target list's post), ':s'],
             [[qw(f fav)], qq(fetch user's favorites instead of post)],
-            [[qw(d devour)], qq(JUST DEVOUR!)]
+            [[qw(d devour)], qq(JUST DEVOUR!)],
+            [[qw(init)], qq(Initialize redis)]
         ]
     )->opts;
 });
@@ -51,7 +50,11 @@ sub run {
     my $self = shift;
 
     # init
-    $self->saved_files;
+    if ($self->opts->{init}) {
+        $self->redis->flushdb();
+        $self->redis->set(basename($_), 1) for (split /\n/, `find @{[$self->settings->{outdir}]} -type f`);
+        exit;
+    }
 
     if (scalar(keys %{$self->opts}) == scalar(grep { !defined $_ } values(%{$self->opts}))) {
         $self->_standard_fetch();
@@ -330,7 +333,7 @@ sub _extract_file_name_and_url {
             }
         }
     }
-    delete($media_info->{$_}) for @{ $self->saved_files };
+    delete($media_info->{$_}) for $self->redis->keys('*');
     return $media_info;
 }
 
@@ -348,7 +351,7 @@ sub _download {
         });
         for my $filename (@$filename_slice) {
             $pm->start and next;
-            if (grep {$filename eq $_} @{$self->saved_files}) {
+            if ($self->redis->get($filename)) {
                 say "[@{[ localtime->datetime ]}]Already saved     : $filename";
                 $pm->finish(-1, [$filename, undef]);
             }
@@ -378,7 +381,7 @@ sub _store {
             or die "[@{[ localtime->datetime ]}]Cannot create file: $!, filename: ".$filename;
         say $fh $binaries->{$filename}->content;
         close $fh;
-        push(@{ $self->saved_files }, $filename);
+        $self->redis->set($filename, 1);
         say "[@{[ localtime->datetime ]}]Image stored       : $filename";
     }
 }

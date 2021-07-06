@@ -7,3 +7,4 @@ requires 'Net::OAuth';
 requires 'Furl';
 requires 'Getopt::Compact';
 requires 'Parallel::ForkManager';
+requires 'Redis';

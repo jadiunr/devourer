@@ -8,3 +8,10 @@ services:
       - .:/app
     stdin_open: true
     tty: true
+    depends_on:
+    - redis
+  redis:
+    image: redis:6.2.1-alpine
+    command: redis-server --appendonly yes
+    volumes:
+    - ./redis:/data

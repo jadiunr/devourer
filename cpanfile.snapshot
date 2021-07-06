@@ -1,35 +1,5 @@
 # carton snapshot format: version 1.0
 DISTRIBUTIONS
-  Archive-Zip-1.68
-    pathname: P/PH/PHRED/Archive-Zip-1.68.tar.gz
-    provides:
-      Archive::Zip 1.68
-      Archive::Zip::Archive 1.68
-      Archive::Zip::BufferedFileHandle 1.68
-      Archive::Zip::DirectoryMember 1.68
-      Archive::Zip::FileMember 1.68
-      Archive::Zip::Member 1.68
-      Archive::Zip::MemberRead 1.68
-      Archive::Zip::MockFileHandle 1.68
-      Archive::Zip::NewFileMember 1.68
-      Archive::Zip::StringMember 1.68
-      Archive::Zip::Tree 1.68
-      Archive::Zip::ZipFileMember 1.68
-    requirements:
-      Compress::Raw::Zlib 2.017
-      Encode 0
-      ExtUtils::MakeMaker 0
-      File::Basename 0
-      File::Copy 0
-      File::Find 0
-      File::Path 0
-      File::Spec 0.80
-      File::Temp 0
-      IO::File 0
-      IO::Handle 0
-      IO::Seekable 0
-      Time::Local 0
-      perl 5.006
   B-Hooks-EndOfScope-0.24
     pathname: E/ET/ETHER/B-Hooks-EndOfScope-0.24.tar.gz
     provides:
@@ -378,15 +348,6 @@ DISTRIBUTIONS
       Socket 0
       Time::HiRes 0
       perl 5.008001
-  Getopt-ArgvFile-1.11
-    pathname: J/JS/JSTENZEL/Getopt-ArgvFile-1.11.tar.gz
-    provides:
-      Getopt::ArgvFile 1.11
-    requirements:
-      ExtUtils::MakeMaker 0
-      Test::Harness 1.25
-      Test::More 0.11
-      Text::ParseWords 3.1
   Getopt-Compact-0.04
     pathname: A/AS/ASW/Getopt-Compact-0.04.tar.gz
     provides:
@@ -556,6 +517,21 @@ DISTRIBUTIONS
       Mozilla::CA 0
       Net::SSLeay 1.46
       Scalar::Util 0
+  IO-Socket-Timeout-0.32
+    pathname: D/DA/DAMS/IO-Socket-Timeout-0.32.tar.gz
+    provides:
+      IO::Socket::Timeout 0.32
+      IO::Socket::Timeout::Role::PerlIO 0.32
+      IO::Socket::Timeout::Role::SetSockOpt 0.32
+    requirements:
+      ExtUtils::MakeMaker 0
+      File::Spec 0
+      IO::Handle 0
+      IPC::Open3 0
+      Module::Build::Tiny 0.039
+      PerlIO::via::Timeout 0.32
+      Test::More 0
+      Test::TCP 0
   JSON-MaybeXS-1.004003
     pathname: E/ET/ETHER/JSON-MaybeXS-1.004003.tar.gz
     provides:
@@ -686,19 +662,6 @@ DISTRIBUTIONS
       perl 5.006
       strict 0
       warnings 0
-  Module-ScanDeps-1.31
-    pathname: R/RS/RSCHUPP/Module-ScanDeps-1.31.tar.gz
-    provides:
-      Module::ScanDeps 1.31
-    requirements:
-      ExtUtils::MakeMaker 0
-      File::Spec 0
-      File::Temp 0
-      Getopt::Long 0
-      Module::Metadata 0
-      Text::ParseWords 0
-      perl 5.008001
-      version 0
   Moo-2.005004
     pathname: H/HA/HAARG/Moo-2.005004.tar.gz
     provides:
@@ -820,64 +783,6 @@ DISTRIBUTIONS
       ExtUtils::MakeMaker 0
       MIME::Base64 0
       perl 5.008001
-  PAR-1.017
-    pathname: R/RS/RSCHUPP/PAR-1.017.tar.gz
-    provides:
-      PAR 1.017
-      PAR::Heavy 0.12
-      PAR::SetupProgname 1.002
-      PAR::SetupTemp 1.002
-    requirements:
-      Archive::Zip 1.00
-      AutoLoader 5.66_02
-      Compress::Zlib 1.30
-      Digest::SHA 5.45
-      ExtUtils::MakeMaker 0
-      File::Temp 0.05
-      PAR::Dist 0.32
-      perl 5.008001
-  PAR-Dist-0.51
-    pathname: R/RS/RSCHUPP/PAR-Dist-0.51.tar.gz
-    provides:
-      PAR::Dist 0.51
-    requirements:
-      ExtUtils::MakeMaker 0
-      File::Find 0
-      File::Path 0
-      File::Spec 0
-      File::Temp 0
-  PAR-Packer-1.052
-    pathname: R/RS/RSCHUPP/PAR-Packer-1.052.tar.gz
-    provides:
-      App::Packer::PAR 0.91
-      PAR::Filter 0.03
-      PAR::Filter::Bleach undef
-      PAR::Filter::Bytecode undef
-      PAR::Filter::Obfuscate undef
-      PAR::Filter::PatchContent undef
-      PAR::Filter::PodStrip undef
-      PAR::Packer 1.052
-      PAR::StrippedPARL::Base 0.975
-      pp 0.992
-    requirements:
-      Archive::Zip 1.02
-      Compress::Zlib 1.30
-      Digest::SHA 5.40
-      DynaLoader 0
-      ExtUtils::CBuilder 0
-      ExtUtils::Embed 0
-      ExtUtils::MakeMaker 0
-      File::Basename 0
-      File::Glob 0
-      File::Spec::Functions 0
-      File::Temp 0.05
-      Getopt::ArgvFile 1.07
-      IO::Compress::Gzip 0
-      Module::ScanDeps 1.21
-      PAR 1.016
-      PAR::Dist 0.22
-      Text::ParseWords 0
-      perl 5.008009
   Package-Stash-0.39
     pathname: E/ET/ETHER/Package-Stash-0.39.tar.gz
     provides:
@@ -959,6 +864,21 @@ DISTRIBUTIONS
       perl 5.008
       strict 0
       warnings 0
+  PerlIO-via-Timeout-0.32
+    pathname: D/DA/DAMS/PerlIO-via-Timeout-0.32.tar.gz
+    provides:
+      PerlIO::via::Timeout 0.32
+    requirements:
+      Exporter 5.57
+      ExtUtils::MakeMaker 0
+      File::Spec 0
+      IO::Handle 0
+      IPC::Open3 0
+      Module::Build::Tiny 0.039
+      PerlIO::via 0
+      Test::More 0
+      Test::TCP 0
+      Time::HiRes 0
   Pod-Parser-1.63
     pathname: M/MA/MAREKR/Pod-Parser-1.63.tar.gz
     provides:
@@ -1002,6 +922,19 @@ DISTRIBUTIONS
       Reply 0
       Term::ANSIColor 0
       perl 5.008001
+  Redis-1.998
+    pathname: D/DA/DAMS/Redis-1.998.tar.gz
+    provides:
+      Redis 1.998
+      Redis::Hash 1.998
+      Redis::List 1.998
+      Redis::Sentinel 1.998
+    requirements:
+      ExtUtils::MakeMaker 6.63_03
+      IO::Socket::Timeout 0.29
+      Module::Build::Tiny 0.034
+      Try::Tiny 0
+      perl 5.006
   Ref-Util-0.204
     pathname: A/AR/ARC/Ref-Util-0.204.tar.gz
     provides:
@@ -1154,6 +1087,34 @@ DISTRIBUTIONS
       Term::ReadLine::Gnu::XS 1.42
     requirements:
       ExtUtils::MakeMaker 0
+      perl 5.008001
+  Test-SharedFork-0.35
+    pathname: E/EX/EXODIST/Test-SharedFork-0.35.tar.gz
+    provides:
+      Test::SharedFork 0.35
+      Test::SharedFork::Array undef
+      Test::SharedFork::Scalar undef
+      Test::SharedFork::Store undef
+    requirements:
+      ExtUtils::MakeMaker 6.64
+      File::Temp 0
+      Test::Builder 0.32
+      Test::Builder::Module 0
+      Test::More 0.88
+      perl 5.008_001
+  Test-TCP-2.22
+    pathname: M/MI/MIYAGAWA/Test-TCP-2.22.tar.gz
+    provides:
+      Net::EmptyPort undef
+      Test::TCP 2.22
+      Test::TCP::CheckPort undef
+    requirements:
+      ExtUtils::MakeMaker 6.64
+      IO::Socket::INET 0
+      IO::Socket::IP 0
+      Test::More 0
+      Test::SharedFork 0.29
+      Time::HiRes 0
       perl 5.008001
   Test-Warn-0.36
     pathname: B/BI/BIGJ/Test-Warn-0.36.tar.gz
@@ -1541,7 +1502,7 @@ DISTRIBUTIONS
       HTTP::Request 6
       HTTP::Request::Common 6
       HTTP::Response 6
-      HTTP::Status 6.07
+      HTTP::Status 6.18
       IO::Select 0
       IO::Socket 0
       LWP::MediaTypes 6
