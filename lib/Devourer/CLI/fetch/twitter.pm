@@ -50,6 +50,9 @@ has opts => (is => 'ro', default => sub {
 sub run {
     my $self = shift;
 
+    # init
+    $self->saved_files;
+
     if (scalar(keys %{$self->opts}) == scalar(grep { !defined $_ } values(%{$self->opts}))) {
         $self->_standard_fetch();
         exit;
@@ -327,7 +330,7 @@ sub _extract_file_name_and_url {
             }
         }
     }
-
+    delete($media_info->{$_}) for @{ $self->saved_files };
     return $media_info;
 }
 
