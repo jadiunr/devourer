@@ -324,16 +324,17 @@ sub _extract_file_name_and_url {
             my $url = (sort { $b->{bitrate} <=> $a->{bitrate} } @$video)[0]{url};
             $url =~ s/\?.+//;
             my $filename = $status_id."-".basename($url);
+            next if $self->redis->get($filename);
             $media_info->{$filename} = $url;
         } else {
             for my $media (@$media_array) {
                 my $url = $media->{media_url};
                 my $filename = $status_id."-".basename($url);
+                next if $self->redis->get($filename);
                 $media_info->{$filename} = $url. '?name=orig';
             }
         }
     }
-    delete($media_info->{$_}) for $self->redis->keys('*');
     return $media_info;
 }
 
@@ -343,7 +344,7 @@ sub _download {
     my $pm = Parallel::ForkManager->new(12);
     my $filenames = [sort keys %$media_urls];
 
-    while (my $filename_slice = [splice @$filenames, 0, 128]) {
+    while (my $filename_slice = [splice @$filenames, 0, 12]) {
         my $binaries = {};
         $pm->run_on_finish(sub {
             my $code = $_[1];
