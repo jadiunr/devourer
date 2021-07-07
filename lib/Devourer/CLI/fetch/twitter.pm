@@ -98,8 +98,8 @@ sub _standard_fetch {
 
     for my $list (@$lists) {
         my $users = $self->_get_list_users($list);
-        for my $user (@$users) {
-            $statuses = $self->_get_user_timeline($user);
+        while (my $users_slice = [splice @$users, 0, 4]) {
+            $statuses = $self->_get_user_timelines($users_slice);
             $media_urls = $self->_extract_file_name_and_url($statuses);
             $self->_download($media_urls);
             last unless @$users;
@@ -343,7 +343,7 @@ sub _download {
     my $pm = Parallel::ForkManager->new(12);
     my $filenames = [sort keys %$media_urls];
 
-    while (my $filename_slice = [splice @$filenames, 0, 12]) {
+    while (my $filename_slice = [splice @$filenames, 0, 128]) {
         my $binaries = {};
         $pm->run_on_finish(sub {
             my $code = $_[1];
