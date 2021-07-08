@@ -65,6 +65,7 @@ sub run {
             my $statuses = $self->_get_users_favorites($mediators_slice);
             my $media_urls = $self->_extract_file_name_and_url($statuses);
             $self->_download($media_urls);
+            last unless @$mediators;
         }
 
         $self->logger->info('Mediators favorites fetching done!');
@@ -162,7 +163,7 @@ sub _get_list_users {
     my $members = $self->twitter->list_members({list_id => $list, count => 5000})->{users};
     my $members_screen_name = [map { $_->{screen_name} } @$members];
 
-    $self->logger->info('Got '. scalar(@$members_screen_name). 'users screen name.');
+    $self->logger->info('Got '. scalar(@$members_screen_name). ' users screen name.');
 
     return $members_screen_name;
 }
@@ -201,7 +202,7 @@ sub _extract_file_name_and_url {
         }
     }
 
-    $self->logger->info('Extracted '. scalar(%$media_info). 'media files');
+    $self->logger->info('Extracted '. scalar(%$media_info). ' media files.');
 
     return $media_info;
 }
