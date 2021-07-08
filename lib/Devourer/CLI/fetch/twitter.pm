@@ -14,7 +14,11 @@ use Data::Dumper;
 use Log::Dispatch;
 
 has nproc => (is => 'ro', default => sub { chomp(my $nproc = `nproc --all`); $nproc });
-has logger => (is => 'ro', default => sub { Log::Dispatch->new() });
+has logger => (is => 'ro', default => sub {
+    Log::Dispatch->new(
+        outputs => [['Screen', min_level => 'info', newline => 1]]
+    );
+});
 has settings => (is => 'ro', default => sub { YAML::Tiny->read('./settings.yml')->[0] });
 has http => (is => 'ro', default => sub { Furl->new(); });
 has twitter => (is => 'ro', lazy => 1, default => sub {
@@ -88,6 +92,9 @@ sub run {
 
 sub _get_users_favorites {
     my ($self, $users) = @_;
+
+    $self->_logging_rate_limit_status();
+
     my $pm = Parallel::ForkManager->new($self->nproc);
     my $users_favorites;
     $pm->run_on_finish(sub {
@@ -96,7 +103,6 @@ sub _get_users_favorites {
         push(@$users_favorites, @$all_statuses) if scalar(@$all_statuses) > 1;
     });
     for my $user (@$users) {
-        $self->_logging_rate_limit_status();
         $pm->start($user) and next;
         my $all_statuses;
         my $max_id;
@@ -118,6 +124,9 @@ sub _get_users_favorites {
 
 sub _get_user_timelines {
     my ($self, $users) = @_;
+
+    $self->_logging_rate_limit_status();
+
     my $pm = Parallel::ForkManager->new($self->nproc);
     my $users_timeline;
     $pm->run_on_finish(sub {
@@ -126,7 +135,6 @@ sub _get_user_timelines {
         push(@$users_timeline, @$all_statuses) if scalar(@$all_statuses) > 1;
     });
     for my $user (@$users) {
-        $self->_logging_rate_limit_status();
         $pm->start and next;
         my $all_statuses;
         my $max_id;
