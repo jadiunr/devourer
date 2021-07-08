@@ -13,6 +13,10 @@ use Parallel::ForkManager;
 use Redis;
 use Data::Dumper;
 
+has nproc => (is => 'ro', default => sub {
+    chomp(my $nproc = `nproc --all`);
+    $nproc;
+});
 has settings => (is => 'ro', default => sub { YAML::Tiny->read('./settings.yml')->[0]; });
 has http => (is => 'ro', default => sub { Furl->new(); });
 has twitter => (is => 'ro', lazy => 1, default => sub {
@@ -40,6 +44,8 @@ has opts => (is => 'ro', default => sub {
 
 sub run {
     my $self = shift;
+    use Pry;
+    pry;
 
     # init
     if ($self->opts->{init}) {
@@ -72,7 +78,7 @@ sub _standard_fetch {
     my $mediators = $self->settings->{mediators};
     my $lists = $self->settings->{lists};
 
-    while (my $mediators_slice = [splice @$mediators, 0, 12]) {
+    while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
         my $statuses = $self->_get_users_favorites($mediators_slice);
         my $media_urls = $self->_extract_file_name_and_url($statuses);
         $self->_download($media_urls)
@@ -80,7 +86,7 @@ sub _standard_fetch {
 
     for my $list (@$lists) {
         my $users = $self->_get_list_users($list);
-        while (my $users_slice = [splice @$users, 0, 12]) {
+        while (my $users_slice = [splice @$users, 0, $self->nproc]) {
             my $statuses = $self->_get_user_timelines($users_slice);
             my $media_urls = $self->_extract_file_name_and_url($statuses);
             $self->_download($media_urls);
@@ -141,7 +147,7 @@ sub _fetch_from_lists {
 
 sub _get_users_favorites {
     my ($self, $users) = @_;
-    my $pm = Parallel::ForkManager->new(12);
+    my $pm = Parallel::ForkManager->new($self->nproc);
     my $users_favorites;
     $pm->run_on_finish(sub {
         my $code = $_[1];
@@ -167,7 +173,7 @@ sub _get_users_favorites {
 
 sub _get_user_timelines {
     my ($self, $users) = @_;
-    my $pm = Parallel::ForkManager->new(12);
+    my $pm = Parallel::ForkManager->new($self->nproc);
     my $users_timeline;
     $pm->run_on_finish(sub {
         my $code = $_[1];
@@ -240,10 +246,10 @@ sub _extract_file_name_and_url {
 sub _download {
     my $self = shift;
     my $media_urls = shift;
-    my $pm = Parallel::ForkManager->new(12);
+    my $pm = Parallel::ForkManager->new($self->nproc);
     my $filenames = [sort keys %$media_urls];
 
-    while (my $filename_slice = [splice @$filenames, 0, 128]) {
+    while (my $filename_slice = [splice @$filenames, 0, $self->nproc * 10]) {
         my $binaries = {};
         $pm->run_on_finish(sub {
             my $code = $_[1];
