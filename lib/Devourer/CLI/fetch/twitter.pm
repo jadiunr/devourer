@@ -26,13 +26,6 @@ has twitter => (is => 'ro', lazy => 1, default => sub {
     );
 });
 has redis => (is => 'ro', default => sub { Redis->new(server => 'redis:6379'); });
-has favorited_statuses => (is => 'ro', lazy => 1, default => sub {
-    my $self = shift;
-    my $statuses = [map {(split '-', basename($_))[0]} (split /\n/, `find @{[$self->settings->{outdir}]}/favorited -type f -a -mtime -30 -print`)];
-    $statuses = [grep {$_ =~ /^\d+$/} @$statuses];
-
-    return [sort {$b <=> $a} @$statuses];
-});
 has opts => (is => 'ro', default => sub {
     Getopt::Compact->new(
         name => 'devourer fetch twitter',
@@ -40,7 +33,6 @@ has opts => (is => 'ro', default => sub {
             [[qw(u user)], qq(fetch specified target user's post), ':s'],
             [[qw(l list)], qq(fetch specified target list's post), ':s'],
             [[qw(f fav)], qq(fetch user's favorites instead of post)],
-            [[qw(d devour)], qq(JUST DEVOUR!)],
             [[qw(init)], qq(Initialize redis)]
         ]
     )->opts;
@@ -72,11 +64,6 @@ sub run {
         $self->_fetch_from_lists($splitted_lists);
         exit;
     }
-
-    if ($self->opts->{devour}) {
-        $self->_devour();
-        exit;
-    }
 }
 
 sub _standard_fetch {
@@ -84,23 +71,18 @@ sub _standard_fetch {
 
     my $mediators = $self->settings->{mediators};
     my $lists = $self->settings->{lists};
-    my ($statuses, $media_urls);
 
-    $statuses = $self->_get_home_timeline();
-    $media_urls = $self->_extract_file_name_and_url($statuses);
-    $self->_download($media_urls);
-
-    for my $mediator (@$mediators) {
-        $statuses = $self->_get_user_favorites($mediator);
-        $media_urls = $self->_extract_file_name_and_url($statuses);
-        $self->_download($media_urls);
+    while (my $mediators_slice = [splice @$mediators, 0, 12]) {
+        my $statuses = $self->_get_users_favorites($mediators_slice);
+        my $media_urls = $self->_extract_file_name_and_url($statuses);
+        $self->_download($media_urls)
     }
 
     for my $list (@$lists) {
         my $users = $self->_get_list_users($list);
         while (my $users_slice = [splice @$users, 0, 12]) {
-            $statuses = $self->_get_user_timelines($users_slice);
-            $media_urls = $self->_extract_file_name_and_url($statuses);
+            my $statuses = $self->_get_user_timelines($users_slice);
+            my $media_urls = $self->_extract_file_name_and_url($statuses);
             $self->_download($media_urls);
             last unless @$users;
         }
@@ -157,83 +139,30 @@ sub _fetch_from_lists {
     }
 }
 
-sub _devour {
-    my $self = shift;
-
-    for my $status (@{$self->favorited_statuses}) {
-        my $user_id = eval { $self->twitter->show_status($status)->{user}{id} };
-        warn "$@: $status" and next if $@;
-
+sub _get_users_favorites {
+    my ($self, $users) = @_;
+    my $pm = Parallel::ForkManager->new(12);
+    my $users_favorites;
+    $pm->run_on_finish(sub {
+        my $code = $_[1];
+        my $all_statuses = $_[5];
+        push(@$users_favorites, @$all_statuses) if scalar(@$all_statuses) > 1;
+    });
+    for my $user (@$users) {
+        $pm->start($user) and next;
+        my $all_statuses;
         my $max_id;
-        for my $iter (1..16) {
-            my $user_statuses;
-            $user_statuses = $self->twitter->user_timeline({user_id => $user_id, count => 200}) if !defined($max_id);
-            $user_statuses = $self->twitter->user_timeline({user_id => $user_id, count => 200, max_id => $max_id}) if defined($max_id);
-
-            for my $user_status (@$user_statuses) {
-                my $media_array = $user_status->{extended_entities}{media};
-                $self->_download($media_array, $user_status->{id}) if $media_array;
-            }
-
-            my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
-            my $user_timeline_limit = $rate_limit_status->{statuses}{'/statuses/user_timeline'};
-            my $show_statuses_limit = $rate_limit_status->{statuses}{'/statuses/show/:id'};
-
-            say "user_timeline limit: ". $user_timeline_limit->{remaining}. "/". $user_timeline_limit->{limit};
-            say "show_statuses_limit: ". $show_statuses_limit->{remaining}. "/". $show_statuses_limit->{limit};
-
-            $max_id = $user_statuses->[-1]{id};
-            last if scalar(@$user_statuses) < 200;
+        for my $iter (1..4) {
+            my $statuses = $self->twitter->favorites({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
+            last if scalar(@$statuses) <= 1;
+            push(@$all_statuses, @$statuses);
+            $max_id = $statuses->[-1]{id};
         }
+        $pm->finish(0, $all_statuses);
     }
-}
+    $pm->wait_all_children;
 
-sub _get_home_timeline {
-    my $self = shift;
-    my $all_statuses = [];
-    my $max_id;
-
-    for my $iter (1..4) {
-        my $statuses = $self->twitter->home_timeline({count => 200, defined($max_id) ? (max_id => $max_id) : ()});
-        last if scalar(@$statuses) <= 1;
-        push(@$all_statuses, @$statuses);
-        $max_id = $statuses->[-1]{id};
-        say "fetch tweets: ". scalar(@$statuses);
-    }
-
-    return $all_statuses;
-}
-
-sub _get_user_favorites {
-    my ($self, $user) = @_;
-    my $all_statuses = [];
-    my $max_id;
-
-    for my $iter (1..4) {
-        my $favorites = $self->twitter->favorites({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
-        last if scalar(@$favorites) <= 1;
-        push(@$all_statuses, @$favorites);
-        $max_id = $favorites->[-1]{id};
-        say "fetch tweets: ". scalar(@$favorites);
-    }
-
-    return $all_statuses;
-}
-
-sub _get_user_timeline {
-    my ($self, $user) = @_;
-
-    my $all_statuses;
-    my $max_id;
-    for my $iter (1..16) {
-        my $statuses;
-        $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
-        last if scalar(@$statuses) <= 1;
-        push(@$all_statuses, @$statuses);
-        $max_id = $statuses->[-1]{id};
-    }
-
-    return $all_statuses;
+    return $users_favorites;
 }
 
 sub _get_user_timelines {
@@ -269,36 +198,6 @@ sub _get_list_users {
     my $members_screen_name = [map { $_->{screen_name} } @$members];
 
     return $members_screen_name;
-}
-
-sub _get_list_statuses {
-    my ($self, $list_id) = @_;
-
-    my $all_statuses;
-    my $max_id;
-    for my $iter (1..16) {
-        my $statuses;
-        $statuses = $self->twitter->list_statuses({list_id => $list_id, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
-        last if scalar(@$statuses) <= 1;
-        push(@$all_statuses, @$statuses);
-        $max_id = $statuses->[-1]{id};
-    }
-
-    return $all_statuses;
-}
-
-sub _sort_and_uniq_statuses {
-    my ($self, $statuses) = @_;
-
-    my %tmp;
-    my $unique_statuses = [grep {!$tmp{$_->{id}}++} @$statuses];
-    my $sorted_statuses = [sort {
-        Time::Piece->strptime($a->{created_at}, '%a %b %d %T %z %Y')
-        <=>
-        Time::Piece->strptime($b->{created_at}, '%a %b %d %T %z %Y')
-    } @$unique_statuses];
-
-    return $sorted_statuses;
 }
 
 sub _extract_user_screen_names {
