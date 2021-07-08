@@ -8,3 +8,4 @@ requires 'Furl';
 requires 'Getopt::Compact';
 requires 'Parallel::ForkManager';
 requires 'Redis';
+requires 'Log::Dispatch';

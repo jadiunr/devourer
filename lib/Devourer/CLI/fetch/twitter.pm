@@ -1,7 +1,6 @@
 package Devourer::CLI::fetch::twitter;
 use Moo;
 use utf8;
-use feature 'say';
 use Getopt::Compact;
 use Time::Piece;
 use File::Basename 'basename';
@@ -12,12 +11,11 @@ use Furl;
 use Parallel::ForkManager;
 use Redis;
 use Data::Dumper;
+use Log::Dispatch;
 
-has nproc => (is => 'ro', default => sub {
-    chomp(my $nproc = `nproc --all`);
-    $nproc;
-});
-has settings => (is => 'ro', default => sub { YAML::Tiny->read('./settings.yml')->[0]; });
+has nproc => (is => 'ro', default => sub { chomp(my $nproc = `nproc --all`); $nproc });
+has logger => (is => 'ro', default => sub { Log::Dispatch->new() });
+has settings => (is => 'ro', default => sub { YAML::Tiny->read('./settings.yml')->[0] });
 has http => (is => 'ro', default => sub { Furl->new(); });
 has twitter => (is => 'ro', lazy => 1, default => sub {
     my $self = shift;
@@ -34,115 +32,58 @@ has opts => (is => 'ro', default => sub {
     Getopt::Compact->new(
         name => 'devourer fetch twitter',
         struct => [
-            [[qw(u user)], qq(fetch specified target user's post), ':s'],
-            [[qw(l list)], qq(fetch specified target list's post), ':s'],
-            [[qw(f fav)], qq(fetch user's favorites instead of post)],
-            [[qw(init)], qq(Initialize redis)]
+            [[qw(init)], qq(Initialize Redis DB)],
+            [[qw(f no-fav)], qq(Do not fetch mediators favourites)],
+            [[qw(l no-list)], qq(Do not fetch list users statuses)]
         ]
     )->opts;
 });
 
 sub run {
     my $self = shift;
-    use Pry;
-    pry;
+
+    $self->_logging_rate_limit_status();
 
     # init
     if ($self->opts->{init}) {
+        $self->logger->info('Initializing Redis DB...');
         $self->redis->flushdb();
         $self->redis->set(basename($_), 1) for (split /\n/, `find @{[$self->settings->{outdir}]} -type f`);
+        $self->logger->info('Initialize Redis DB done!');
         exit;
     }
 
-    if (scalar(keys %{$self->opts}) == scalar(grep { !defined $_ } values(%{$self->opts}))) {
-        $self->_standard_fetch();
-        exit;
-    }
+    if (!$self->opts->{'no-fav'}) {
+        $self->logger->info('Mediators favorites fetching started!');
 
-    if ($self->opts->{user}) {
-        my $splitted_users = [split /,/, $self->opts->{user}];
-        $self->_fetch_from_users($splitted_users);
-        exit;
-    }
-
-    if ($self->opts->{list}) {
-        my $splitted_lists = [split /,/, $self->opts->{list}];
-        $self->_fetch_from_lists($splitted_lists);
-        exit;
-    }
-}
-
-sub _standard_fetch {
-    my $self = shift;
-
-    my $mediators = $self->settings->{mediators};
-    my $lists = $self->settings->{lists};
-
-    while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
-        my $statuses = $self->_get_users_favorites($mediators_slice);
-        my $media_urls = $self->_extract_file_name_and_url($statuses);
-        $self->_download($media_urls)
-    }
-
-    for my $list (@$lists) {
-        my $users = $self->_get_list_users($list);
-        while (my $users_slice = [splice @$users, 0, $self->nproc]) {
-            my $statuses = $self->_get_user_timelines($users_slice);
+        my $mediators = $self->settings->{mediators};
+        while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
+            my $statuses = $self->_get_users_favorites($mediators_slice);
             my $media_urls = $self->_extract_file_name_and_url($statuses);
             $self->_download($media_urls);
-            last unless @$users;
         }
+
+        $self->logger->info('Mediators favorites fetching done!');
     }
-}
 
-sub _fetch_from_users {
-    my ($self, $users) = @_;
+    if (!$self->opts->{'no-list'}) {
+        $self->logger->info('List users statuses fetching started!');
 
-    for my $user (@$users) {
-        my $statuses = $self->opts->{fav} ? $self->_get_favorites($user) : $self->_get_user_timeline($user);
-        my $sorted_statuses = $self->_sort_and_uniq_statuses($statuses);
-
-        for my $status (@$sorted_statuses) {
-            my $media_array = $status->{extended_entities}{media};
-            $self->_download($media_array, $status->{id}) if $media_array;
-        }
-
-        my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
-        say Dumper $rate_limit_status->{favorites};
-        say Dumper $rate_limit_status->{statuses}{'/statuses/user_timeline'};
-    }
-}
-
-sub _fetch_from_lists {
-    my ($self, $lists) = @_;
-
-    for my $list_id (@$lists) {
-        my $statuses = $self->_get_list_statuses($list_id);
-        my $sorted_statuses = $self->_sort_and_uniq_statuses($statuses);
-
-        for my $status (@$sorted_statuses) {
-            my $media_array = $status->{extended_entities}{media};
-            $self->_download($media_array, $status->{id}) if $media_array;
-        }
-
-        my $users = $self->_extract_user_screen_names($sorted_statuses);
-
-        for my $user (@$users) {
-            my $user_timeline = $self->_get_user_timeline($user);
-
-            for my $status (@$user_timeline) {
-                my $media_array = $status->{extended_entities}{media};
-                $self->_download($media_array, $status->{id}) if $media_array;
+        my $lists = $self->settings->{lists};
+        for my $list (@$lists) {
+            my $users = $self->_get_list_users($list);
+            while (my $users_slice = [splice @$users, 0, $self->nproc]) {
+                my $statuses = $self->_get_user_timelines($users_slice);
+                my $media_urls = $self->_extract_file_name_and_url($statuses);
+                $self->_download($media_urls);
+                last unless @$users;
             }
-
-            my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
-            say Dumper $rate_limit_status->{statuses}{'/statuses/user_timeline'};
         }
 
-        my $rate_limit_status = $self->twitter->rate_limit_status()->{resources};
-        say Dumper $rate_limit_status->{lists}{'/lists/statuses'};
-        say Dumper $rate_limit_status->{statuses}{'/statuses/user_timeline'};
+        $self->logger->info('List users statuses fetching done!');
     }
+
+    $self->logger->info('All done... I ate too much, I\'m full. :yum:');
 }
 
 sub _get_users_favorites {
@@ -155,6 +96,7 @@ sub _get_users_favorites {
         push(@$users_favorites, @$all_statuses) if scalar(@$all_statuses) > 1;
     });
     for my $user (@$users) {
+        $self->_logging_rate_limit_status();
         $pm->start($user) and next;
         my $all_statuses;
         my $max_id;
@@ -163,10 +105,13 @@ sub _get_users_favorites {
             last if scalar(@$statuses) <= 1;
             push(@$all_statuses, @$statuses);
             $max_id = $statuses->[-1]{id};
+            $self->logger->info('Got '. $user. '\'s favorites. Next start with max_id='. $max_id);
         }
         $pm->finish(0, $all_statuses);
     }
     $pm->wait_all_children;
+
+    $self->logger->info('Got all '. scalar(@$users). ' users '. scalar(@$users_favorites). ' favorites.');
 
     return $users_favorites;
 }
@@ -181,6 +126,7 @@ sub _get_user_timelines {
         push(@$users_timeline, @$all_statuses) if scalar(@$all_statuses) > 1;
     });
     for my $user (@$users) {
+        $self->_logging_rate_limit_status();
         $pm->start and next;
         my $all_statuses;
         my $max_id;
@@ -189,10 +135,13 @@ sub _get_user_timelines {
             last if scalar(@$statuses) <= 1;
             push(@$all_statuses, @$statuses);
             $max_id = $statuses->[-1]{id};
+            $self->logger->info('Got '. $user. '\'s statuses. Next start with max_id='. $max_id);
         }
         $pm->finish(0, $all_statuses);
     }
     $pm->wait_all_children;
+
+    $self->logger->info('Got all '. scalar(@$users). ' users statuses.');
 
     return $users_timeline;
 }
@@ -200,20 +149,23 @@ sub _get_user_timelines {
 sub _get_list_users {
     my ($self, $list) = @_;
 
+    $self->_logging_rate_limit_status();
+
     my $members = $self->twitter->list_members({list_id => $list, count => 5000})->{users};
     my $members_screen_name = [map { $_->{screen_name} } @$members];
+
+    $self->logger->info('Got '. scalar(@$members_screen_name). 'users screen name.');
 
     return $members_screen_name;
 }
 
-sub _extract_user_screen_names {
-    my ($self, $statuses) = @_;
-
-    my %tmp;
-    my $user_screen_names = [map {$_->{user}{screen_name}} @$statuses];
-    my $unique_user_screen_names = [grep {!$tmp{$_}++} @$user_screen_names];
-
-    return $unique_user_screen_names;
+sub _logging_rate_limit_status {
+    my ($self) = @_;
+    my $limit = $self->twitter->rate_limit_status({resources => ['statuses', 'favorites', 'lists']})->{resources};
+    my $user_timeline_remaining = $limit->{statuses}{'/statuses/user_timeline'}{remaining};
+    my $favorites_remaining = $limit->{favorites}{'/favorites/list'}{remaining};
+    my $list_members_remaining = $limit->{lists}{'/lists/members'}{remaining};
+    $self->logger->info("Rate Limitting info: user_timeline: $user_timeline_remaining, favorites: $favorites_remaining, list_members: $list_members_remaining");
 }
 
 sub _extract_file_name_and_url {
@@ -240,6 +192,9 @@ sub _extract_file_name_and_url {
             }
         }
     }
+
+    $self->logger->info('Extracted '. scalar(%$media_info). 'media files');
+
     return $media_info;
 }
 
@@ -258,13 +213,12 @@ sub _download {
         for my $filename (@$filename_slice) {
             $pm->start and next;
             if ($self->redis->get($filename)) {
-                say "[@{[ localtime->datetime ]}]Already saved     : $filename";
+                $self->logger->info($filename. ' is already stored.');
                 $pm->finish(-1, [$filename, undef]);
             }
             my $res = $self->http->get($media_urls->{$filename});
-            warn "[@{[ localtime->datetime ]}]Cannot fetch video: returned ". $res->code. ", url: ". $media_urls->{$filename} and $pm->finish(-1, [$filename, undef])
-                if $res->code != 200;
-            say "[@{[ localtime->datetime ]}]Media downloaded!     : ". $media_urls->{$filename};
+            $self->logger->warn('Cannot download this video '. $media_urls->{$filename}. ' with HTTP Status Code '. $res->code) and $pm->finish(-1, [$filename, undef]) if $res->code != 200;
+            $self->logger->info('Media file downloaded! URL: '. $media_urls->{$filename});
             $pm->finish(0, [$filename, $res]);
         }
         $pm->wait_all_children;
@@ -278,17 +232,17 @@ sub _store {
     my $now = localtime;
     my ($year, $month, $day) = ($now->year, $now->strftime('%m'), $now->strftime('%d'));
 
-    mkdir "./@{[$self->settings->{outdir}]}/searching/$year" unless -d "./@{[$self->settings->{outdir}]}/searching/$year";
-    mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month" unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month";
-    mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day" unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day";
+    mkdir "./@{[$self->settings->{outdir}]}/searching/$year" and $self->logger->info($year. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/searching/$year";
+    mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month" and $self->logger->info($year. '/'. $month. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month";
+    mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day" and $self->logger->info($year. '/'. $month. '/'. $day. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day";
 
     for my $filename (@{[sort keys %$binaries]}) {
         open my $fh, ">", "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day/$filename"
-            or die "[@{[ localtime->datetime ]}]Cannot create file: $!, filename: ".$filename;
-        say $fh $binaries->{$filename}->content;
+            or die "Cannot create file: $!, filename: ".$filename;
+        print $fh $binaries->{$filename}->content;
         close $fh;
         $self->redis->set($filename, 1);
-        say "[@{[ localtime->datetime ]}]Image stored       : $filename";
+        $self->logger->info('Media file stored in storage! Filename: '. $filename);
     }
 }
 
