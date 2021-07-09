@@ -133,6 +133,7 @@ sub _get_user_timelines {
     $pm->run_on_finish(sub {
         my $code = $_[1];
         my $all_statuses = $_[5];
+        return unless defined($all_statuses);
         push(@$users_timeline, @$all_statuses) if scalar(@$all_statuses) > 1;
     });
     for my $user (@$users) {
