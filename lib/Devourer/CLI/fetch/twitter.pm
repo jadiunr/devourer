@@ -239,7 +239,11 @@ sub _download {
                 $self->logger->info($filename. ' is already stored.');
                 $pm->finish(-1, [$filename, undef]);
             }
-            my $res = $self->http->get($media_urls->{$filename});
+            my $res;
+            for (1..10) {
+                $res = $self->http->get($media_urls->{$filename});
+                last if $res->code !~ /^5/;
+            }
             $self->logger->warn('Cannot download this video '. $media_urls->{$filename}. ' with HTTP Status Code '. $res->code) and $pm->finish(-1, [$filename, undef]) if $res->code != 200;
             $self->logger->info('Media file downloaded! URL: '. $media_urls->{$filename});
             $pm->finish(0, [$filename, $res]);
