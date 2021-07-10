@@ -31,7 +31,12 @@ has twitter => (is => 'ro', lazy => 1, default => sub {
         access_token_secret => $self->settings->{twitter}{access_token_secret}
     );
 });
-has redis => (is => 'ro', default => sub { Redis->new(server => 'redis:6379'); });
+has stored_media_files => (is => 'ro', default => sub { Redis->new(server => 'redis:6379'); });
+has stored_list_members => (is => 'ro', default => sub {
+    my $redis = Redis->new(server => 'redis:6379');
+    $redis->select(1);
+    return $redis;
+});
 has opts => (is => 'ro', default => sub {
     Getopt::Compact->new(
         name => 'devourer fetch twitter',
@@ -48,12 +53,13 @@ sub run {
 
     $self->_logging_rate_limit_status();
 
-    # init
+    # Init Redis
     if ($self->opts->{init}) {
         $self->logger->info('Initializing Redis DB...');
-        $self->redis->flushdb();
-        $self->redis->set(basename($_), 1) for (split /\n/, `find @{[$self->settings->{outdir}]} -type f`);
-        $self->logger->info('Initialize Redis DB done!');
+        $self->stored_media_files->flushdb();
+        $self->stored_media_files->set(basename($_), 1) for (split /\n/, `find @{[$self->settings->{outdir}]} -type f`);
+        $self->stored_list_members->flushdb();
+        $self->logger->info('Initialize done!');
         exit;
     }
 
@@ -140,13 +146,20 @@ sub _get_user_timelines {
         $pm->start and next;
         my $all_statuses;
         my $max_id;
+        my $is_stored_member = $self->stored_list_members->get($user) ? 1 : undef;
         for my $iter (1..16) {
             my $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
             last if scalar(@$statuses) <= 1;
             push(@$all_statuses, @$statuses);
             $max_id = $statuses->[-1]{id};
-            $self->logger->info('Got '. $user. '\'s statuses. Next start with max_id='. $max_id);
+            if ($is_stored_member) {
+                $self->logger->info('Got '. $user. '\'s statuses.');
+                last;
+            } else {
+                $self->logger->info('Got '. $user. '\'s statuses. Next start with max_id='. $max_id);
+            }
         }
+        $self->stored_list_members->set($user, 1) unless $is_stored_member;
         $pm->finish(0, $all_statuses);
     }
     $pm->wait_all_children;
@@ -191,13 +204,13 @@ sub _extract_file_name_and_url {
             my $url = (sort { $b->{bitrate} <=> $a->{bitrate} } @$video)[0]{url};
             $url =~ s/\?.+//;
             my $filename = $status_id."-".basename($url);
-            next if $self->redis->get($filename);
+            next if $self->stored_media_files->get($filename);
             $media_info->{$filename} = $url;
         } else {
             for my $media (@$media_array) {
                 my $url = $media->{media_url};
                 my $filename = $status_id."-".basename($url);
-                next if $self->redis->get($filename);
+                next if $self->stored_media_files->get($filename);
                 $media_info->{$filename} = $url. '?name=orig';
             }
         }
@@ -222,7 +235,7 @@ sub _download {
         });
         for my $filename (@$filename_slice) {
             $pm->start and next;
-            if ($self->redis->get($filename)) {
+            if ($self->stored_media_files->get($filename)) {
                 $self->logger->info($filename. ' is already stored.');
                 $pm->finish(-1, [$filename, undef]);
             }
@@ -251,7 +264,7 @@ sub _store {
             or die "Cannot create file: $!, filename: ".$filename;
         print $fh $binaries->{$filename}->content;
         close $fh;
-        $self->redis->set($filename, 1);
+        $self->stored_media_files->set($filename, 1);
         $self->logger->info('Media file stored in storage! Filename: '. $filename);
     }
 }
