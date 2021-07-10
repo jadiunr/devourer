@@ -3,7 +3,7 @@ version: '3'
 services:
   app:
     build: .
-    command: bash
+    command: carton exec perl devourer fetch twitter -d
     volumes:
       - .:/app
     stdin_open: true
