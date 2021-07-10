@@ -43,7 +43,8 @@ has opts => (is => 'ro', default => sub {
         struct => [
             [[qw(init)], qq(Initialize Redis DB)],
             [[qw(f no-fav)], qq(Do not fetch mediators favourites)],
-            [[qw(l no-list)], qq(Do not fetch list users statuses)]
+            [[qw(l no-list)], qq(Do not fetch list users statuses)],
+            [[qw(d loop)], qq(Make it loop through a series of processes)]
         ]
     )->opts;
 });
@@ -63,35 +64,39 @@ sub run {
         exit;
     }
 
-    if (!$self->opts->{'no-fav'}) {
-        $self->logger->info('Mediators favorites fetching started!');
+    while (1) {
+        if (!$self->opts->{'no-fav'}) {
+            $self->logger->info('Mediators favorites fetching started!');
 
-        my $mediators = $self->settings->{mediators};
-        while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
-            my $statuses = $self->_get_users_favorites($mediators_slice);
-            my $media_urls = $self->_extract_file_name_and_url($statuses);
-            $self->_download($media_urls);
-            last unless @$mediators;
-        }
-
-        $self->logger->info('Mediators favorites fetching done!');
-    }
-
-    if (!$self->opts->{'no-list'}) {
-        $self->logger->info('List users statuses fetching started!');
-
-        my $lists = $self->settings->{lists};
-        for my $list (@$lists) {
-            my $users = $self->_get_list_users($list);
-            while (my $users_slice = [splice @$users, 0, $self->nproc]) {
-                my $statuses = $self->_get_user_timelines($users_slice);
+            my $mediators = $self->settings->{mediators};
+            while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
+                my $statuses = $self->_get_users_favorites($mediators_slice);
                 my $media_urls = $self->_extract_file_name_and_url($statuses);
                 $self->_download($media_urls);
-                last unless @$users;
+                last unless @$mediators;
             }
+
+            $self->logger->info('Mediators favorites fetching done!');
         }
 
-        $self->logger->info('List users statuses fetching done!');
+        if (!$self->opts->{'no-list'}) {
+            $self->logger->info('List users statuses fetching started!');
+
+            my $lists = $self->settings->{lists};
+            for my $list (@$lists) {
+                my $users = $self->_get_list_users($list);
+                while (my $users_slice = [splice @$users, 0, $self->nproc]) {
+                    my $statuses = $self->_get_user_timelines($users_slice);
+                    my $media_urls = $self->_extract_file_name_and_url($statuses);
+                    $self->_download($media_urls);
+                    last unless @$users;
+                }
+            }
+
+            $self->logger->info('List users statuses fetching done!');
+        }
+
+        last unless $self->opts->{loop};
     }
 
     $self->logger->info('All done... I ate too much, I\'m full. :yum:');
