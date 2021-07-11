@@ -83,6 +83,12 @@ DISTRIBUTIONS
       Class::Tiny 1.003
       ExtUtils::MakeMaker 0
       perl 5.006
+  Clone-0.45
+    pathname: A/AT/ATOOMIC/Clone-0.45.tar.gz
+    provides:
+      Clone 0.45
+    requirements:
+      ExtUtils::MakeMaker 0
   Config-INI-0.027
     pathname: R/RJ/RJBS/Config-INI-0.027.tar.gz
     provides:

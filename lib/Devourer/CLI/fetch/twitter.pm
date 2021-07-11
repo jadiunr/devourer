@@ -12,6 +12,7 @@ use Parallel::ForkManager;
 use Redis;
 use Data::Dumper;
 use Log::Dispatch;
+use Clone 'clone';
 
 has nproc => (is => 'ro', default => sub { chomp(my $nproc = `nproc --all`); $nproc });
 has logger => (is => 'ro', default => sub {
@@ -68,7 +69,7 @@ sub run {
         if (!$self->opts->{'no-fav'}) {
             $self->logger->info('Mediators favorites fetching started!');
 
-            my $mediators = $self->settings->{mediators};
+            my $mediators = clone($self->settings->{mediators});
             while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
                 my $statuses = $self->_get_users_favorites($mediators_slice);
                 my $media_urls = $self->_extract_file_name_and_url($statuses);
