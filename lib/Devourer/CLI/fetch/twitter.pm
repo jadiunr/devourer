@@ -171,7 +171,7 @@ sub _get_user_timelines {
     }
     $pm->wait_all_children;
 
-    $self->logger->info('Got all '. scalar(@$users). ' users statuses.');
+    $self->logger->info('Got all '. scalar(@$user_ids). ' users statuses.');
 
     return $users_timeline;
 }
@@ -184,9 +184,9 @@ sub _get_list_members {
     my $members = $self->twitter->list_members({list_id => $list, count => 5000})->{users};
     my $member_ids = [map { $_->{id_str} } @$members];
 
-    $self->logger->info('Got '. scalar(@$members_ids). ' members screen name.');
+    $self->logger->info('Got '. scalar(@$member_ids). ' members screen name.');
 
-    return $members_ids;
+    return $member_ids;
 }
 
 sub _logging_rate_limit_status {
