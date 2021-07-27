@@ -7,6 +7,7 @@ use File::Basename 'basename';
 use File::Path 'mkpath';
 use Twitter::API;
 use YAML::Tiny;
+use JSON 'encode_json';
 use Furl;
 use Parallel::ForkManager;
 use Redis;
@@ -38,6 +39,11 @@ has stored_list_members => (is => 'ro', default => sub {
     $redis->select(1);
     return $redis;
 });
+has read_members => (is => 'ro', default => sub {
+    my $redis = Redis->new(server => 'redis:6379');
+    $redis->select(2);
+    return $redis;
+});
 has opts => (is => 'ro', default => sub {
     Getopt::Compact->new(
         name => 'devourer fetch twitter',
@@ -61,6 +67,7 @@ sub run {
         $self->stored_media_files->flushdb();
         $self->stored_media_files->set(basename($_), 1) for (split /\n/, `find @{[$self->settings->{outdir}]} -type f`);
         $self->stored_list_members->flushdb();
+        $self->read_members->flushdb();
         $self->logger->info('Initialize done!');
         exit;
     }
@@ -221,11 +228,35 @@ sub _extract_file_name_and_url {
                 $media_info->{$filename} = $url. '?name=orig';
             }
         }
+        $self->_notify_to_slack_if_not_read_yet($status);
     }
 
     $self->logger->info('Extracted '. scalar(%$media_info). ' media files.');
 
     return $media_info;
+}
+
+sub _notify_to_slack_if_not_read_yet {
+    my ($self, $status) = @_;
+    my $orig_status = $status->{retweeted_status} ? $status->{retweeted_status} : $status;
+    my $user_id = $orig_status->{user}{id_str};
+    my $user_screen_name = $orig_status->{user}{screen_name};
+    my $status_id = $orig_status->{id_str};
+
+    return if $self->stored_list_members->get($user_id);
+    return if $self->read_members->get($user_id);
+
+    my $payload = encode_json({
+        text => "Please check here: https://twitter.com/$user_screen_name/status/$status_id"
+    });
+
+    $self->http->post(
+        $self->settings->{slack_webhook_url},
+        [],
+        [ payload => $payload ]
+    );
+
+    $self->read_members->set($user_id, 1);
 }
 
 sub _download {

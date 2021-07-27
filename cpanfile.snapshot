@@ -562,6 +562,14 @@ DISTRIBUTIONS
       PerlIO::via::Timeout 0.32
       Test::More 0
       Test::TCP 0
+  JSON-4.03
+    pathname: I/IS/ISHIGAKI/JSON-4.03.tar.gz
+    provides:
+      JSON 4.03
+      JSON::Backend::PP 4.03
+    requirements:
+      ExtUtils::MakeMaker 0
+      Test::More 0
   JSON-MaybeXS-1.004003
     pathname: E/ET/ETHER/JSON-MaybeXS-1.004003.tar.gz
     provides:
@@ -1700,7 +1708,7 @@ DISTRIBUTIONS
       HTTP::Request 6
       HTTP::Request::Common 6
       HTTP::Response 6
-      HTTP::Status 6.18
+      HTTP::Status 6.07
       IO::Select 0
       IO::Socket 0
       LWP::MediaTypes 6

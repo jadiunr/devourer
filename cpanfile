@@ -10,3 +10,4 @@ requires 'Parallel::ForkManager';
 requires 'Redis';
 requires 'Log::Dispatch';
 requires 'Clone';
+requires 'JSON';
