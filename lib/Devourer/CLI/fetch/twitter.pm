@@ -123,7 +123,7 @@ sub _get_users_favorites {
             my $statuses = $self->twitter->favorites({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
             last if scalar(@$statuses) <= 1;
             push(@$all_statuses, @$statuses);
-            $max_id = $statuses->[-1]{id};
+            $max_id = $statuses->[-1]{id_str};
             $self->logger->info('Got '. $user. '\'s favorites. Next start with max_id='. $max_id);
         }
         $pm->finish(0, $all_statuses);
@@ -157,7 +157,7 @@ sub _get_user_timelines {
             my $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
             last if scalar(@$statuses) <= 1;
             push(@$all_statuses, @$statuses);
-            $max_id = $statuses->[-1]{id};
+            $max_id = $statuses->[-1]{id_str};
             if ($is_stored_member) {
                 $self->logger->info('Got '. $user. '\'s statuses.');
                 last;
@@ -203,7 +203,7 @@ sub _extract_file_name_and_url {
     for my $status (@$all_statuses) {
         my $media_array = $status->{extended_entities}{media};
         next unless $media_array;
-        my $status_id = $media_array->[0]{source_status_id} ? $media_array->[0]{source_status_id} : $status->{id};
+        my $status_id = $media_array->[0]{source_status_id_str} ? $media_array->[0]{source_status_id_str} : $status->{id_str};
         if ($media_array->[0]{video_info}) {
             my $video = $media_array->[0]{video_info}{variants};
             for (@$video) { $_->{bitrate} = 0 unless $_->{bitrate} }
