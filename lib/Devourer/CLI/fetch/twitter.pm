@@ -81,20 +81,20 @@ sub run {
         }
 
         if (!$self->opts->{'no-list'}) {
-            $self->logger->info('List users statuses fetching started!');
+            $self->logger->info('List members statuses fetching started!');
 
-            my $lists = $self->settings->{lists};
-            for my $list (@$lists) {
-                my $users = $self->_get_list_users($list);
-                while (my $users_slice = [splice @$users, 0, $self->nproc]) {
-                    my $statuses = $self->_get_user_timelines($users_slice);
+            my $list_ids = $self->settings->{lists};
+            for my $list_id (@$list_ids) {
+                my $member_ids = $self->_get_list_members($list_id);
+                while (my $member_ids_slice = [splice @$member_ids, 0, $self->nproc]) {
+                    my $statuses = $self->_get_user_timelines($member_ids_slice);
                     my $media_urls = $self->_extract_file_name_and_url($statuses);
                     $self->_download($media_urls);
-                    last unless @$users;
+                    last unless @$member_ids;
                 }
             }
 
-            $self->logger->info('List users statuses fetching done!');
+            $self->logger->info('List members statuses fetching done!');
         }
 
         last unless $self->opts->{loop};
@@ -136,7 +136,7 @@ sub _get_users_favorites {
 }
 
 sub _get_user_timelines {
-    my ($self, $users) = @_;
+    my ($self, $user_ids) = @_;
 
     $self->_logging_rate_limit_status();
 
@@ -148,24 +148,25 @@ sub _get_user_timelines {
         return unless defined($all_statuses);
         push(@$users_timeline, @$all_statuses) if scalar(@$all_statuses) > 1;
     });
-    for my $user (@$users) {
+    for my $user_id (@$user_ids) {
         $pm->start and next;
         my $all_statuses;
         my $max_id;
-        my $is_stored_member = $self->stored_list_members->get($user) ? 1 : undef;
+        my $is_stored_member = $self->stored_list_members->get($user_id) ? 1 : undef;
         for my $iter (1..16) {
-            my $statuses = $self->twitter->user_timeline({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
+            my $statuses = $self->twitter->user_timeline({user_id => $user_id, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
             last if scalar(@$statuses) <= 1;
+            my $screen_name = $statuses->[0]{user}{screen_name};
             push(@$all_statuses, @$statuses);
             $max_id = $statuses->[-1]{id_str};
             if ($is_stored_member) {
-                $self->logger->info('Got '. $user. '\'s statuses.');
+                $self->logger->info("Got $screen_name ($user_id)'s statuses");
                 last;
             } else {
-                $self->logger->info('Got '. $user. '\'s statuses. Next start with max_id='. $max_id);
+                $self->logger->info("Got $screen_name ($user_id)'s statuses. Next start with max_id=$max_id");
             }
         }
-        $self->stored_list_members->set($user, 1) unless $is_stored_member;
+        $self->stored_list_members->set($user_id, 1) unless $is_stored_member;
         $pm->finish(0, $all_statuses);
     }
     $pm->wait_all_children;
@@ -175,17 +176,17 @@ sub _get_user_timelines {
     return $users_timeline;
 }
 
-sub _get_list_users {
+sub _get_list_members {
     my ($self, $list) = @_;
 
     $self->_logging_rate_limit_status();
 
     my $members = $self->twitter->list_members({list_id => $list, count => 5000})->{users};
-    my $members_screen_name = [map { $_->{screen_name} } @$members];
+    my $member_ids = [map { $_->{id_str} } @$members];
 
-    $self->logger->info('Got '. scalar(@$members_screen_name). ' users screen name.');
+    $self->logger->info('Got '. scalar(@$members_ids). ' members screen name.');
 
-    return $members_screen_name;
+    return $members_ids;
 }
 
 sub _logging_rate_limit_status {
