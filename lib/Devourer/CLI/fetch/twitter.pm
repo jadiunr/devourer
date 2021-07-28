@@ -72,20 +72,6 @@ sub run {
     }
 
     while (1) {
-        if (!$self->opts->{'no-fav'}) {
-            $self->logger->info('Mediators favorites fetching started!');
-
-            my $mediators = clone($self->settings->{mediators});
-            while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
-                my $statuses = $self->_get_users_favorites($mediators_slice);
-                my $media_urls = $self->_extract_file_name_and_url($statuses);
-                $self->_download($media_urls);
-                last unless @$mediators;
-            }
-
-            $self->logger->info('Mediators favorites fetching done!');
-        }
-
         if (!$self->opts->{'no-list'}) {
             $self->logger->info('List members statuses fetching started!');
 
@@ -101,6 +87,20 @@ sub run {
             }
 
             $self->logger->info('List members statuses fetching done!');
+        }
+
+        if (!$self->opts->{'no-fav'}) {
+            $self->logger->info('Mediators favorites fetching started!');
+
+            my $mediators = clone($self->settings->{mediators});
+            while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
+                my $statuses = $self->_get_users_favorites($mediators_slice);
+                my $media_urls = $self->_extract_file_name_and_url($statuses);
+                $self->_download($media_urls);
+                last unless @$mediators;
+            }
+
+            $self->logger->info('Mediators favorites fetching done!');
         }
 
         last unless $self->opts->{loop};
