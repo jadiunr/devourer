@@ -8,3 +8,8 @@ outdir: media
 
 mediators:
 - 
+
+lists:
+- 
+
+slack_webhook_url: 

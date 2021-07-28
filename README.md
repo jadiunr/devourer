@@ -2,6 +2,10 @@
 
 貪る者
 
+## Disclaimer
+
+おれ専用ツールです
+
 ## Requirements
 
 - Docker
@@ -20,24 +24,13 @@ docker-compose run --rm app carton install --deployment
 - settings.yml
     - twitter: put secrets
     - outdir: picture file output destination (default: media)
-    - mediators: specify target displayname of user as array (only use standard fetch)
+    - mediators: specify target displayname of user as array
+    - lists: specify target list id
+    - slack_webhook_url: notify slack of tweets with media from users who have not been added to the list and have never been notified.
 
 - run
 
 ```
-docker-compose run --rm app carton exec -- ./devourer fetch twitter
+docker-compose up -d redis
+docker-compose up -d app
 ```
-
-- other commands
-
-```
-# specify user
-docker-compose run --rm app carton exec -- ./devourer fetch twitter --user=jadiunr
-
-# specify user (but fetches favorites)
-docker-compose run --rm app carton exec -- ./devourer fetch twitter --user=jadiunr --fav
-
-# fetch all statuses of the author of the image stored in the favorites directory
-docker-compose run --rm app carton exec -- ./devourer fetch twitter --devour
-```
-
