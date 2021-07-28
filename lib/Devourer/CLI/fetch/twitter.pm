@@ -11,7 +11,6 @@ use JSON 'encode_json';
 use Furl;
 use Parallel::ForkManager;
 use Redis;
-use Data::Dumper;
 use Log::Dispatch;
 use Clone 'clone';
 
