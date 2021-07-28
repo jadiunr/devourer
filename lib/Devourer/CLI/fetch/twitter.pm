@@ -210,6 +210,7 @@ sub _extract_file_name_and_url {
     for my $status (@$all_statuses) {
         my $media_array = $status->{extended_entities}{media};
         next unless $media_array;
+        $self->_notify_to_slack_if_not_read_yet($status);
         my $status_id = $media_array->[0]{source_status_id_str} ? $media_array->[0]{source_status_id_str} : $status->{id_str};
         if ($media_array->[0]{video_info}) {
             my $video = $media_array->[0]{video_info}{variants};
@@ -227,7 +228,6 @@ sub _extract_file_name_and_url {
                 $media_info->{$filename} = $url. '?name=orig';
             }
         }
-        $self->_notify_to_slack_if_not_read_yet($status);
     }
 
     $self->logger->info('Extracted '. scalar(%$media_info). ' media files.');
