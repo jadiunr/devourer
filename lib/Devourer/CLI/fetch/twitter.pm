@@ -246,11 +246,13 @@ sub _notify_to_slack_if_not_read_yet {
     return if $self->read_members->get($user_id);
     return if $orig_status->{user}{followers_count} < 10000;
 
-    $self->http->post(
+    my $res = $self->http->post(
         $self->settings->{discord_webhook_url},
         [],
         [ content => "https://twitter.com/$user_screen_name/status/$status_id" ]
     );
+
+    warn 'Furl: '. $res->code. ' '. $res->message and return if $res->code !~ /^2/;
 
     $self->read_members->set($user_id, 1);
 }
