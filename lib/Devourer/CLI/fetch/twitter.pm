@@ -244,9 +244,10 @@ sub _notify_to_slack_if_not_read_yet {
 
     return if $self->stored_list_members->get($user_id);
     return if $self->read_members->get($user_id);
+    return if $orig_status->{user}{followers_count} < 10000;
 
     my $payload = encode_json({
-        text => "Please check here: https://twitter.com/$user_screen_name/status/$status_id"
+        text => "https://twitter.com/$user_screen_name/status/$status_id"
     });
 
     $self->http->post(
