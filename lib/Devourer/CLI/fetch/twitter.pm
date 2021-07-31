@@ -32,6 +32,7 @@ has twitter => (is => 'ro', lazy => 1, default => sub {
         access_token_secret => $self->settings->{twitter}{access_token_secret}
     );
 });
+has current_list_members => (is => 'rw', default => sub { [] });
 has stored_media_files => (is => 'ro', default => sub { Redis->new(server => 'redis:6379'); });
 has stored_list_members => (is => 'ro', default => sub {
     my $redis = Redis->new(server => 'redis:6379');
@@ -75,15 +76,12 @@ sub run {
         if (!$self->opts->{'no-list'}) {
             $self->logger->info('List members statuses fetching started!');
 
-            my $list_ids = $self->settings->{lists};
-            for my $list_id (@$list_ids) {
-                my $member_ids = $self->_get_list_members($list_id);
-                while (my $member_ids_slice = [splice @$member_ids, 0, $self->nproc]) {
-                    my $statuses = $self->_get_user_timelines($member_ids_slice);
-                    my $media_urls = $self->_extract_file_name_and_url($statuses);
-                    $self->_download($media_urls);
-                    last unless @$member_ids;
-                }
+            push(@{ $self->current_list_members }, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
+            while (my $member_ids_slice = [splice @{ $self->current_list_members }, 0, $self->nproc]) {
+                my $statuses = $self->_get_user_timelines($member_ids_slice);
+                my $media_urls = $self->_extract_file_name_and_url($statuses);
+                $self->_download($media_urls);
+                last unless @{ $self->current_list_members };
             }
 
             $self->logger->info('List members statuses fetching done!');
@@ -103,6 +101,7 @@ sub run {
             $self->logger->info('Mediators favorites fetching done!');
         }
 
+        $self->current_list_members([]);
         last unless $self->opts->{loop};
     }
 
@@ -242,6 +241,7 @@ sub _notify_to_slack_if_not_read_yet {
     my $user_screen_name = $orig_status->{user}{screen_name};
     my $status_id = $orig_status->{id_str};
 
+    return if grep {$user_id eq $_} @{ $self->current_list_members };
     return if $self->stored_list_members->get($user_id);
     return if $self->read_members->get($user_id);
     return if $orig_status->{user}{followers_count} < 10000;
