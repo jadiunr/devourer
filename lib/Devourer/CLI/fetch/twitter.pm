@@ -246,14 +246,10 @@ sub _notify_to_slack_if_not_read_yet {
     return if $self->read_members->get($user_id);
     return if $orig_status->{user}{followers_count} < 10000;
 
-    my $payload = encode_json({
-        text => "https://twitter.com/$user_screen_name/status/$status_id"
-    });
-
     $self->http->post(
-        $self->settings->{slack_webhook_url},
+        $self->settings->{discord_webhook_url},
         [],
-        [ payload => $payload ]
+        [ content => "https://twitter.com/$user_screen_name/status/$status_id" ]
     );
 
     $self->read_members->set($user_id, 1);
