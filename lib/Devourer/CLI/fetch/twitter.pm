@@ -160,8 +160,9 @@ sub _get_user_timelines {
         my $max_id;
         my $is_stored_member = $self->stored_list_members->get($user_id) ? 1 : undef;
         for my $iter (1..16) {
-            my $statuses = $self->twitter->user_timeline({user_id => $user_id, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
-            last if scalar(@$statuses) <= 1;
+            my $statuses = eval { $self->twitter->user_timeline({user_id => $user_id, count => 200, defined($max_id) ? (max_id => $max_id) : ()}) };
+            last unless defined($statuses);
+            last if scalar(@$statuses) <= 0;
             my $screen_name = $statuses->[0]{user}{screen_name};
             push(@$all_statuses, @$statuses);
             $max_id = $statuses->[-1]{id_str};
