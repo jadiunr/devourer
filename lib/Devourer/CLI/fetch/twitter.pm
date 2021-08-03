@@ -288,12 +288,13 @@ sub _download {
                 $pm->finish(-1, [$filename, undef]);
             }
             my $res;
-            for (1..10) {
+            for (1..16) {
                 $res = $self->http->get($media_urls->{$filename});
-                last if $res->code !~ /^5/;
+                last if $res->code == 200;
+                $self->logger->info("Download failed! Retrying...: $filename ($media_urls->{$filename})");
             }
-            $self->logger->warn('Cannot download this video '. $media_urls->{$filename}. ' with HTTP Status Code '. $res->code) and $pm->finish(-1, [$filename, undef]) if $res->code != 200;
-            $self->logger->info('Media file downloaded! URL: '. $media_urls->{$filename});
+            $self->logger->warn("Cannot download this media file $filename ($media_urls->{$filename}) with HTTP Status Code ". $res->code) and $pm->finish(-1, [$filename, undef]) if $res->code != 200;
+            $self->logger->info("Media file downloaded: $filename ($media_urls->{$filename})");
             $pm->finish(0, [$filename, $res]);
         }
         $pm->wait_all_children;
