@@ -1,4 +1,4 @@
-package Devourer::CLI::fetch::twitter;
+package Devourer::CLI::Twitter::Fetch;
 use Moo;
 use utf8;
 use Getopt::Compact;
@@ -51,8 +51,7 @@ has opts => (is => 'ro', default => sub {
         struct => [
             [[qw(init)], qq(Initialize Redis DB)],
             [[qw(f no-fav)], qq(Do not fetch mediators favourites)],
-            [[qw(l no-list)], qq(Do not fetch list users statuses)],
-            [[qw(d loop)], qq(Make it loop through a series of processes)]
+            [[qw(l no-list)], qq(Do not fetch list users statuses)]
         ]
     )->opts;
 });
@@ -73,37 +72,32 @@ sub run {
         exit;
     }
 
-    while (1) {
-        if (!$self->opts->{'no-list'}) {
-            $self->logger->info('List members statuses fetching started!');
+    if (!$self->opts->{'no-list'}) {
+        $self->logger->info('List members statuses fetching started!');
 
-            push(@{ $self->current_list_members }, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
-            while (my $member_ids_slice = [splice @{ $self->current_list_members }, 0, $self->nproc]) {
-                my $statuses = $self->_get_user_timelines($member_ids_slice);
-                my $media_urls = $self->_extract_file_name_and_url($statuses, 100000);
-                $self->_download($media_urls);
-                last unless @{ $self->current_list_members };
-            }
-
-            $self->logger->info('List members statuses fetching done!');
+        push(@{ $self->current_list_members }, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
+        while (my $member_ids_slice = [splice @{ $self->current_list_members }, 0, $self->nproc]) {
+            my $statuses = $self->_get_user_timelines($member_ids_slice);
+            my $media_urls = $self->_extract_file_name_and_url($statuses, 100000);
+            $self->_download($media_urls);
+            last unless @{ $self->current_list_members };
         }
 
-        if (!$self->opts->{'no-fav'}) {
-            $self->logger->info('Mediators favorites fetching started!');
+        $self->logger->info('List members statuses fetching done!');
+    }
 
-            my $mediators = clone($self->settings->{mediators});
-            while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
-                my $statuses = $self->_get_users_favorites($mediators_slice);
-                my $media_urls = $self->_extract_file_name_and_url($statuses, 0);
-                $self->_download($media_urls);
-                last unless @$mediators;
-            }
+    if (!$self->opts->{'no-fav'}) {
+        $self->logger->info('Mediators favorites fetching started!');
 
-            $self->logger->info('Mediators favorites fetching done!');
+        my $mediators = clone($self->settings->{mediators});
+        while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
+            my $statuses = $self->_get_users_favorites($mediators_slice);
+            my $media_urls = $self->_extract_file_name_and_url($statuses, 0);
+            $self->_download($media_urls);
+            last unless @$mediators;
         }
 
-        $self->current_list_members([]);
-        last unless $self->opts->{loop};
+        $self->logger->info('Mediators favorites fetching done!');
     }
 
     $self->logger->info('All done... I ate too much, I\'m full. :yum:');
