@@ -1,15 +1,14 @@
 package Devourer::CLI;
 
 sub run {
-    my @args = @_;
-
-    my $module = join '::', (grep {$_ !~ /^-/} @args);
+    my $class = shift;
+    my $module = join '::', (map {ucfirst $_} (grep {$_ !~ /^-/} ($class, @ARGV)));
 
     eval "require $module";
     die $@ if $@;
 
     my $command = $module->new;
-    return $command->run();
+    return $command->run;
 }
 
 1;

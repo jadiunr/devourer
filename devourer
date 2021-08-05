@@ -8,4 +8,4 @@ use lib "$FindBin::Bin/lib";
 
 use Devourer::CLI;
 
-Devourer::CLI->run(@ARGV);
+Devourer::CLI->run;
