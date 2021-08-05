@@ -80,7 +80,7 @@ sub run {
             push(@{ $self->current_list_members }, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
             while (my $member_ids_slice = [splice @{ $self->current_list_members }, 0, $self->nproc]) {
                 my $statuses = $self->_get_user_timelines($member_ids_slice);
-                my $media_urls = $self->_extract_file_name_and_url($statuses);
+                my $media_urls = $self->_extract_file_name_and_url($statuses, 100000);
                 $self->_download($media_urls);
                 last unless @{ $self->current_list_members };
             }
@@ -94,7 +94,7 @@ sub run {
             my $mediators = clone($self->settings->{mediators});
             while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
                 my $statuses = $self->_get_users_favorites($mediators_slice);
-                my $media_urls = $self->_extract_file_name_and_url($statuses);
+                my $media_urls = $self->_extract_file_name_and_url($statuses, 0);
                 $self->_download($media_urls);
                 last unless @$mediators;
             }
@@ -206,12 +206,12 @@ sub _logging_rate_limit_status {
 }
 
 sub _extract_file_name_and_url {
-    my ($self, $all_statuses) = @_;
+    my ($self, $all_statuses, $min_followers_count) = @_;
     my $media_info = {};
     for my $status (@$all_statuses) {
         my $media_array = $status->{extended_entities}{media};
         next unless $media_array;
-        $self->_notify_to_slack_if_not_read_yet($status);
+        $self->_notify_to_slack_if_not_read_yet($status, $min_followers_count);
         my $status_id = $media_array->[0]{source_status_id_str} ? $media_array->[0]{source_status_id_str} : $status->{id_str};
         if ($media_array->[0]{video_info}) {
             my $video = $media_array->[0]{video_info}{variants};
@@ -237,7 +237,7 @@ sub _extract_file_name_and_url {
 }
 
 sub _notify_to_slack_if_not_read_yet {
-    my ($self, $status) = @_;
+    my ($self, $status, $min_followers_count) = @_;
     my $orig_status = $status->{retweeted_status} ? $status->{retweeted_status} : $status;
     my $user_id = $orig_status->{user}{id_str};
     my $user_screen_name = $orig_status->{user}{screen_name};
@@ -246,7 +246,7 @@ sub _notify_to_slack_if_not_read_yet {
     return if grep {$user_id eq $_} @{ $self->current_list_members };
     return if $self->stored_list_members->get($user_id);
     return if $self->read_members->get($user_id);
-    return if $orig_status->{user}{followers_count} < 10000;
+    return if $orig_status->{user}{followers_count} < $min_followers_count;
 
     my $try = 0;
     ATTEMPT: {
