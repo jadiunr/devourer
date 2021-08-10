@@ -302,12 +302,12 @@ sub _store {
     my $now = localtime;
     my ($year, $month, $day) = ($now->year, $now->strftime('%m'), $now->strftime('%d'));
 
-    mkdir "./@{[$self->settings->{outdir}]}/searching/$year" and $self->logger->info($year. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/searching/$year";
-    mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month" and $self->logger->info($year. '/'. $month. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month";
-    mkdir "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day" and $self->logger->info($year. '/'. $month. '/'. $day. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day";
+    mkdir "./@{[$self->settings->{outdir}]}/$year" and $self->logger->info($year. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/$year";
+    mkdir "./@{[$self->settings->{outdir}]}/$year/$month" and $self->logger->info($year. '/'. $month. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/$year/$month";
+    mkdir "./@{[$self->settings->{outdir}]}/$year/$month/$day" and $self->logger->info($year. '/'. $month. '/'. $day. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/$year/$month/$day";
 
     for my $filename (@{[sort keys %$binaries]}) {
-        open my $fh, ">", "./@{[$self->settings->{outdir}]}/searching/$year/$month/$day/$filename"
+        open my $fh, ">", "./@{[$self->settings->{outdir}]}/$year/$month/$day/$filename"
             or die "Cannot create file: $!, filename: ".$filename;
         print $fh $binaries->{$filename}->content;
         close $fh;
