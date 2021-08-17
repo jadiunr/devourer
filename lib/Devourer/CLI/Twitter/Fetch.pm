@@ -208,7 +208,7 @@ sub _extract_file_name_and_url {
         next unless $media_array;
         $self->_notify_to_slack_if_not_read_yet($status, $min_followers_count);
         my $status_id = $media_array->[0]{source_status_id_str} ? $media_array->[0]{source_status_id_str} : $status->{id_str};
-        my $user_id = $status->{retweeted} ? $status->{retweeted_status}{user}{id_str} : $status->{user}{id_str};
+        my $user_id = $status->{retweeted_status} ? $status->{retweeted_status}{user}{id_str} : $status->{user}{id_str};
         if ($media_array->[0]{video_info}) {
             my $video = $media_array->[0]{video_info}{variants};
             for (@$video) { $_->{bitrate} = 0 unless $_->{bitrate} }
@@ -221,6 +221,7 @@ sub _extract_file_name_and_url {
                 move $old_path, $new_path;
                 $self->stored_media_files->del($old_filename);
                 $self->stored_media_files->set($filename, $new_path);
+                $self->logger->info("FILE MOVED! '$old_filename' TO '$filename'");
                 next;
             }
             next if $self->stored_media_files->get($filename);
