@@ -78,7 +78,7 @@ sub run {
         push(@{ $self->current_list_members }, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
         while (my $member_ids_slice = [splice @{ $self->current_list_members }, 0, $self->nproc]) {
             my $statuses = $self->_get_user_timelines($member_ids_slice);
-            my $media_urls = $self->_extract_file_name_and_url($statuses, 100000);
+            my $media_urls = $self->_extract_file_name_and_url($statuses, $self->settings->{min_followers});
             $self->_download($media_urls);
             last unless @{ $self->current_list_members };
         }
