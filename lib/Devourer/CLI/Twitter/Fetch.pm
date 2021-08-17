@@ -3,7 +3,8 @@ use Moo;
 use utf8;
 use Getopt::Compact;
 use Time::Piece;
-use File::Basename 'basename';
+use File::Basename qw(basename dirname);
+use File::Copy 'move';
 use File::Path 'mkpath';
 use Twitter::API;
 use YAML::Tiny;
@@ -65,7 +66,7 @@ sub run {
     if ($self->opts->{init}) {
         $self->logger->info('Initializing Redis DB...');
         $self->stored_media_files->flushdb();
-        $self->stored_media_files->set(basename($_), 1) for (split /\n/, `find @{[$self->settings->{outdir}]} -type f`);
+        $self->stored_media_files->set(basename($_), $_) for (split /\n/, `find @{[$self->settings->{outdir}]} -type f`);
         $self->stored_list_members->flushdb();
         $self->read_members->flushdb();
         $self->logger->info('Initialize done!');
@@ -207,18 +208,27 @@ sub _extract_file_name_and_url {
         next unless $media_array;
         $self->_notify_to_slack_if_not_read_yet($status, $min_followers_count);
         my $status_id = $media_array->[0]{source_status_id_str} ? $media_array->[0]{source_status_id_str} : $status->{id_str};
+        my $user_id = $status->{retweeted} ? $status->{retweeted_status}{user}{id_str} : $status->{user}{id_str};
         if ($media_array->[0]{video_info}) {
             my $video = $media_array->[0]{video_info}{variants};
             for (@$video) { $_->{bitrate} = 0 unless $_->{bitrate} }
             my $url = (sort { $b->{bitrate} <=> $a->{bitrate} } @$video)[0]{url};
             $url =~ s/\?.+//;
-            my $filename = $status_id."-".basename($url);
+            my $old_filename = $status_id."-".basename($url);
+            my $filename = $user_id."-".$status_id."-".basename($url);
+            if (my $old_path = $self->stored_media_files->get($old_filename)) {
+                my $new_path = dirname($old_path). "/$filename";
+                move $old_path, $new_path;
+                $self->stored_media_files->del($old_filename);
+                $self->stored_media_files->set($filename, $new_path);
+                next;
+            }
             next if $self->stored_media_files->get($filename);
             $media_info->{$filename} = $url;
         } else {
             for my $media (@$media_array) {
                 my $url = $media->{media_url};
-                my $filename = $status_id."-".basename($url);
+                my $filename = $user_id."-".$status_id."-".basename($url);
                 next if $self->stored_media_files->get($filename);
                 $media_info->{$filename} = $url. '?name=orig';
             }
@@ -301,17 +311,16 @@ sub _store {
     my ($self, $binaries) = @_;
     my $now = localtime;
     my ($year, $month, $day) = ($now->year, $now->strftime('%m'), $now->strftime('%d'));
+    my $path = "@{[$self->settings->{outdir}]}/$year/$month/$day";
 
-    mkdir "./@{[$self->settings->{outdir}]}/$year" and $self->logger->info($year. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/$year";
-    mkdir "./@{[$self->settings->{outdir}]}/$year/$month" and $self->logger->info($year. '/'. $month. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/$year/$month";
-    mkdir "./@{[$self->settings->{outdir}]}/$year/$month/$day" and $self->logger->info($year. '/'. $month. '/'. $day. ' directory is not exist, so a new one has been created') unless -d "./@{[$self->settings->{outdir}]}/$year/$month/$day";
+    mkpath $path and $self->logger->info("'$path' directory is not exist, so a new one has been created") unless -d $path;
 
     for my $filename (@{[sort keys %$binaries]}) {
-        open my $fh, ">", "./@{[$self->settings->{outdir}]}/$year/$month/$day/$filename"
+        open my $fh, ">", "$path/$filename"
             or die "Cannot create file: $!, filename: ".$filename;
         print $fh $binaries->{$filename}->content;
         close $fh;
-        $self->stored_media_files->set($filename, 1);
+        $self->stored_media_files->set($filename, "$path/$filename");
         $self->logger->info('Media file stored in storage! Filename: '. $filename);
     }
 }

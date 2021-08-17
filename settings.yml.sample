@@ -14,4 +14,4 @@ lists:
 
 min_followers: 100000
 
-slack_webhook_url: 
+discord_webhook_url: 
