@@ -202,6 +202,7 @@ sub _logging_rate_limit_status {
 
 sub _extract_file_name_and_url {
     my ($self, $all_statuses, $min_followers_count) = @_;
+    my $rename_list = [];
     my $media_info = {};
     for my $status (@$all_statuses) {
         my $media_array = $status->{extended_entities}{media};
@@ -218,10 +219,16 @@ sub _extract_file_name_and_url {
             my $filename = $user_id."-".$status_id."-".basename($url);
             if (my $old_path = $self->stored_media_files->get($old_filename)) {
                 my $new_path = dirname($old_path). "/$filename";
-                move $old_path, $new_path;
-                $self->stored_media_files->del($old_filename);
-                $self->stored_media_files->set($filename, $new_path);
-                $self->logger->info("FILE MOVED! '$old_filename' TO '$filename'");
+                push(@$rename_list, {
+                    old_path => $old_path,
+                    new_path => $new_path,
+                    old_filename => $old_filename,
+                    new_filename => $filename
+                });
+                # move $old_path, $new_path;
+                # $self->stored_media_files->del($old_filename);
+                # $self->stored_media_files->set($filename, $new_path);
+                # $self->logger->info("FILE MOVED! '$old_filename' TO '$filename'");
                 next;
             }
             next if $self->stored_media_files->get($filename);
@@ -233,16 +240,37 @@ sub _extract_file_name_and_url {
                 my $filename = $user_id."-".$status_id."-".basename($url);
                 if (my $old_path = $self->stored_media_files->get($old_filename)) {
                     my $new_path = dirname($old_path). "/$filename";
-                    move $old_path, $new_path;
-                    $self->stored_media_files->del($old_filename);
-                    $self->stored_media_files->set($filename, $new_path);
-                    $self->logger->info("FILE MOVED! '$old_filename' TO '$filename'");
+                    push(@$rename_list, {
+                        old_path => $old_path,
+                        new_path => $new_path,
+                        old_filename => $old_filename,
+                        new_filename => $filename
+                    });
+                    # move $old_path, $new_path;
+                    # $self->stored_media_files->del($old_filename);
+                    # $self->stored_media_files->set($filename, $new_path);
+                    # $self->logger->info("FILE MOVED! '$old_filename' TO '$filename'");
                     next;
                 }
                 next if $self->stored_media_files->get($filename);
                 $media_info->{$filename} = $url. '?name=orig';
             }
         }
+    }
+    if (@$rename_list) {
+        my $pm = Parallel::ForkManager->new(8);
+        while (my $rename_list_slice = [splice @$rename_list, 0, 32]) {
+            $pm->start and last unless @$rename_list;
+            $pm->start and next if @$rename_list;
+            for my $rename (@$rename_list) {
+                move $rename->{old_path}, $rename->{new_path};
+                $self->stored_media_files->del($rename->{old_filename});
+                $self->stored_media_files->set($rename->{new_filename}, $rename->{new_path});
+                $self->logger->info("FILE MOVED! ". $rename->{old_filename} ." TO ". $rename->{new_filename});
+            }
+            $pm->finish;
+        }
+        $pm->wait_all_children;
     }
 
     $self->logger->info('Extracted '. scalar(%$media_info). ' media files.');
