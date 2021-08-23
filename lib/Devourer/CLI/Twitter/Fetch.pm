@@ -77,7 +77,11 @@ sub run {
         $self->logger->info('List members statuses fetching started!');
 
         push(@{ $self->current_list_members }, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
+        my $list_members_max_num = @{ $self->current_list_members };
+        my $list_members_cur_num = 0;
         while (my $member_ids_slice = [splice @{ $self->current_list_members }, 0, $self->nproc]) {
+            $list_members_cur_num += @$member_ids_slice;
+            $self->logger->info("$list_members_cur_num/$list_members_max_num members fetching...");
             my $statuses = $self->_get_user_timelines($member_ids_slice);
             my $media_urls = $self->_extract_file_name_and_url($statuses, $self->settings->{min_followers});
             $self->_download($media_urls);
@@ -173,7 +177,7 @@ sub _get_user_timelines {
     }
     $pm->wait_all_children;
 
-    $self->logger->info('Got all '. scalar(@$user_ids). ' users statuses.');
+    $self->logger->info('Got all '. scalar(@$user_ids). ' users, '. scalar(@$users_timeline). ' statuses.');
 
     return $users_timeline;
 }
