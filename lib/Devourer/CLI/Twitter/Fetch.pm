@@ -211,7 +211,7 @@ sub _extract_file_name_and_url {
     for my $status (@$all_statuses) {
         my $media_array = $status->{extended_entities}{media};
         next unless $media_array;
-        $self->_notify_to_slack_if_not_read_yet($status, $min_followers_count);
+        $self->_notify_to_slack_if_not_read_yet($status, $min_followers_count) if $self->settings->{discord_webhook_url};
         my $status_id = $media_array->[0]{source_status_id_str} ? $media_array->[0]{source_status_id_str} : $status->{id_str};
         my $user_id = $status->{retweeted_status} ? $status->{retweeted_status}{user}{id_str} : $status->{user}{id_str};
         if ($media_array->[0]{video_info}) {
