@@ -312,7 +312,7 @@ sub _download {
                 last if $res->code == 200;
                 $self->logger->info("Download failed! Retrying...: $filename ($media_urls->{$filename})");
             }
-            $self->logger->warn("Cannot download this media file $filename ($media_urls->{$filename}) with HTTP Status Code ". $res->code) and $pm->finish(-1, [$filename, undef]) if $res->code != 200;
+            $self->logger->warn("Cannot download this media file $filename ($media_urls->{$filename}) with HTTP Status Code ". $res->code) and $pm->finish(-1, [$filename, undef]) if $res->code != 200 or $res->content =~ /timeout/;
             $self->logger->info("Media file downloaded: $filename ($media_urls->{$filename})");
             $pm->finish(0, [$filename, $res]);
         }
