@@ -17,8 +17,10 @@ has stored_media_files => (is => 'ro', default => sub { Redis->new(server => 're
 
 sub run {
     my $self = shift;
+    my $count = 0;
     my $pm = Parallel::ForkManager->new($self->nproc);
-    while(my $files = $self->stored_media_files->scan(0, 'count', $self->nproc * 64)) {
+
+    while(my $files = $self->stored_media_files->scan($count, 'count', $self->nproc * 64)) {
         while(my $files_slice = [splice @{ $files->[1] }, 0, 64]) {
             $pm->start and last unless @$files_slice;
             $pm->start and next if @$files_slice;
@@ -36,6 +38,7 @@ sub run {
         }
         $pm->wait_all_children;
         last if $files->[0] eq '0';
+        $count = $files->[0];
     }
 }
 
