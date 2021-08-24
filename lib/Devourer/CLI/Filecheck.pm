@@ -27,7 +27,9 @@ sub run {
                 if (-T $path) {
                     unlink $path;
                     $self->stored_media_files->del($file);
-                    $self->logger->info("Corrupted file deleted : $path");
+                    $self->logger->info("CORRUPTED FILE DELETED! : $path");
+                } else {
+                    $self->logger->info("OK : $path");
                 }
             }
             $pm->finish;
