@@ -223,7 +223,7 @@ sub _extract_file_name_and_url {
             my $filename = $user_id."-".$status_id."-".basename($url);
             if (my $old_path = $self->stored_media_files->get($old_filename)) {
                 my $new_path = dirname($old_path). "/$filename";
-                move $old_path, $new_path;
+                rename $old_path, $new_path;
                 $self->stored_media_files->del($old_filename);
                 $self->stored_media_files->set($filename, $new_path);
                 $self->logger->info("FILE MOVED! '$old_filename' TO '$filename'");
@@ -238,7 +238,7 @@ sub _extract_file_name_and_url {
                 my $filename = $user_id."-".$status_id."-".basename($url);
                 if (my $old_path = $self->stored_media_files->get($old_filename)) {
                     my $new_path = dirname($old_path). "/$filename";
-                    move $old_path, $new_path;
+                    rename $old_path, $new_path;
                     $self->stored_media_files->del($old_filename);
                     $self->stored_media_files->set($filename, $new_path);
                     $self->logger->info("FILE MOVED! '$old_filename' TO '$filename'");
