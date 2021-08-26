@@ -166,7 +166,6 @@ sub _get_user_timelines {
         for my $iter (1..16) {
             my $statuses = eval { $self->twitter->user_timeline({user_id => $user_id, count => 200, defined($max_id) ? (max_id => $max_id) : ()}) };
             last unless defined($statuses);
-            last if scalar(@$statuses) <= 0;
             my $screen_name = $statuses->[0]{user}{screen_name};
             push(@$all_statuses, @$statuses);
             $max_id = $statuses->[-1]{id_str};
@@ -176,6 +175,7 @@ sub _get_user_timelines {
             } else {
                 $self->logger->info("Got $screen_name ($user_id)'s statuses. Next start with max_id=$max_id");
             }
+            last if scalar(@$statuses) <= 1;
         }
         $self->stored_list_members->set($user_id, 1) unless $is_stored_member;
         $pm->finish(0, $all_statuses);
@@ -259,8 +259,10 @@ sub _extract_file_name_and_url {
 
     $self->logger->info('Extracted '. scalar(%$media_info). ' media files.');
 
-    $media_info->{$_} = $self->redownload_list->get($_) for @{ $self->redownload_list->keys('*') };
-    $self->redownload_list->flushdb();
+    if ($self->redownload_list->dbsize > 0) {
+        $media_info->{$_} = $self->redownload_list->get($_) for @{ $self->redownload_list->keys('*') };
+        $self->redownload_list->flushdb();
+    }
 
     return $media_info;
 }
