@@ -46,6 +46,11 @@ has read_members => (is => 'ro', default => sub {
     $redis->select(2);
     return $redis;
 });
+has redownload_list => (is => 'ro', default => sub {
+    my $redis = Redis->new(server => 'redis:6379');
+    $redis->select(3);
+    return $redis;
+});
 has opts => (is => 'ro', default => sub {
     Getopt::Compact->new(
         name => 'devourer fetch twitter',
@@ -254,6 +259,8 @@ sub _extract_file_name_and_url {
 
     $self->logger->info('Extracted '. scalar(%$media_info). ' media files.');
 
+    $media_info->{$_} = $self->redownload_list->get($_) for @{ $self->redownload_list->keys('*') };
+
     return $media_info;
 }
 
@@ -308,13 +315,12 @@ sub _download {
                 $self->logger->info($filename. ' is already stored.');
                 $pm->finish(-1, [$filename, undef]);
             }
-            my $res;
-            for (1..16) {
-                $res = $self->http->get($media_urls->{$filename});
-                last if $res->code == 200;
-                $self->logger->info("Download failed! Retrying...: $filename ($media_urls->{$filename})");
+            my $res = $self->http->get($media_urls->{$filename});
+            if ($res->code != 200 or $res->content =~ /timeout/) {
+                $self->logger->warn("Cannot download this media file $filename ($media_urls->{$filename}) with HTTP Status Code ". $res->code);
+                $self->redownload_list->set($filename, $media_urls->{$filename}) if $res->code =~ /^5/;
+                $pm->finish(-1, [$filename, undef]);
             }
-            $self->logger->warn("Cannot download this media file $filename ($media_urls->{$filename}) with HTTP Status Code ". $res->code) and $pm->finish(-1, [$filename, undef]) if $res->code != 200 or $res->content =~ /timeout/;
             $self->logger->info("Media file downloaded: $filename ($media_urls->{$filename})");
             $pm->finish(0, [$filename, $res]);
         }
