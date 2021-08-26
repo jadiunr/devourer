@@ -260,7 +260,7 @@ sub _extract_file_name_and_url {
     $self->logger->info('Extracted '. scalar(%$media_info). ' media files.');
 
     if ($self->redownload_list->dbsize > 0) {
-        $media_info->{$_} = $self->redownload_list->get($_) for @{ $self->redownload_list->keys('*') };
+        $media_info->{$_} = $self->redownload_list->get($_) for $self->redownload_list->keys('*');
         $self->redownload_list->flushdb();
     }
 
