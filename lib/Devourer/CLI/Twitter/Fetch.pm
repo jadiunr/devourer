@@ -261,7 +261,6 @@ sub _extract_file_name_and_url {
 
     if ($self->redownload_list->dbsize > 0) {
         $media_info->{$_} = $self->redownload_list->get($_) for $self->redownload_list->keys('*');
-        $self->redownload_list->flushdb();
     }
 
     return $media_info;
@@ -321,9 +320,10 @@ sub _download {
             my $res = $self->http->get($media_urls->{$filename});
             if ($res->code != 200 or $res->content =~ /timeout/) {
                 $self->logger->warn("Cannot download this media file $filename ($media_urls->{$filename}) with HTTP Status Code ". $res->code);
-                $self->redownload_list->set($filename, $media_urls->{$filename}) if $res->code =~ /^5/;
+                $self->redownload_list->set($filename, $media_urls->{$filename}) if ($res->code =~ /^5/ or $res->code == 429);
                 $pm->finish(-1, [$filename, undef]);
             }
+            $self->redownload_list->del($filename) if $self->redownload_list->get($filename);
             $self->logger->info("Media file downloaded: $filename ($media_urls->{$filename})");
             $pm->finish(0, [$filename, $res]);
         }
