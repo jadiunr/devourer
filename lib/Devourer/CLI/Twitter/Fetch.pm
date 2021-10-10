@@ -90,6 +90,9 @@ sub run {
             my $statuses = $self->_get_user_timelines($member_ids_slice);
             my $media_urls = $self->_extract_file_name_and_url($statuses, $self->settings->{min_followers});
             $self->_download($media_urls);
+            for (@$member_ids_slice) {
+                $self->stored_list_members->set($_, 1) unless $self->stored_list_members->get($_);
+            }
             last unless @{ $self->current_list_members };
         }
 
@@ -177,7 +180,6 @@ sub _get_user_timelines {
             }
             last if scalar(@$statuses) <= 1;
         }
-        $self->stored_list_members->set($user_id, 1) unless $is_stored_member;
         $pm->finish(0, $all_statuses);
     }
     $pm->wait_all_children;
