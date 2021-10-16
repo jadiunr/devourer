@@ -82,6 +82,7 @@ sub run {
         $self->logger->info('List members statuses fetching started!');
 
         push(@{ $self->current_list_members }, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
+        $self->read_members->set($_, 1) for @{ $self->current_list_members };
         my $list_members_max_num = @{ $self->current_list_members };
         my $list_members_cur_num = 0;
         while (my $member_ids_slice = [splice @{ $self->current_list_members }, 0, $self->nproc]) {
