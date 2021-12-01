@@ -281,22 +281,38 @@ sub _notify_to_slack_if_not_read_yet {
     return if $self->read_members->get($user_id);
     return if $orig_status->{user}{followers_count} < $min_followers_count;
 
-    my $try = 0;
-    ATTEMPT: {
-        my $res = $self->http->post(
-            $self->settings->{discord_webhook_url},
-            [],
-            [ content => "https://twitter.com/$user_screen_name/status/$status_id" ]
-        );
-        if ($res->code !~ /^2/) {
-            if ($try++ < 512) {
-                warn $res->content;
-                sleep 0.5;
-                redo ATTEMPT;
-            } else {
-                return;
+    if ($self->settings->{discord_webhook_url}) {
+        my $try = 0;
+        ATTEMPT: {
+            my $res = $self->http->post(
+                $self->settings->{discord_webhook_url},
+                [],
+                [ content => "https://twitter.com/$user_screen_name/status/$status_id" ]
+            );
+            if ($res->code !~ /^2/) {
+                if ($try++ < 512) {
+                    warn $res->content;
+                    sleep 0.5;
+                    redo ATTEMPT;
+                } else {
+                    return;
+                }
             }
         }
+    }
+
+    if ($self->settings->{slack_webhook_url}) {
+        my $payload = encode_json({
+            text => "https://twitter.com/$user_screen_name/status/$status_id"
+        });
+
+        my $res = $self->http->post(
+            $self->settings->{slack_webhook_url},
+            [],
+            [ payload => $payload ]
+        );
+
+        print("Slack notified: return code ". $res->code);
     }
 
     $self->read_members->set($user_id, 1);
