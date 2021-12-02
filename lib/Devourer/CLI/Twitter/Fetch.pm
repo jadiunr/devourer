@@ -312,7 +312,7 @@ sub _notify_to_slack_if_not_read_yet {
             [ payload => $payload ]
         );
 
-        print("Slack notified: return code ". $res->code);
+        print("Slack notified: return code ". $res->code. "\n");
     }
 
     $self->read_members->set($user_id, 1);
