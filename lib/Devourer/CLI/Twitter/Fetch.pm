@@ -15,6 +15,7 @@ use Redis;
 use Log::Dispatch;
 use Clone 'clone';
 use Time::HiRes 'sleep';
+use Net::Statsd;
 
 has nproc => (is => 'ro', default => sub { chomp(my $nproc = `nproc --all`); $nproc });
 has logger => (is => 'ro', default => sub {
@@ -57,10 +58,13 @@ has opts => (is => 'ro', default => sub {
         struct => [
             [[qw(init)], qq(Initialize Redis DB)],
             [[qw(f no-fav)], qq(Do not fetch mediators favourites)],
-            [[qw(l no-list)], qq(Do not fetch list users statuses)]
+            [[qw(l no-list)], qq(Do not fetch list users statuses)],
+            [[qw(statsd)], qq(Send run duration metric as StatsD)]
         ]
     )->opts;
 });
+has start_time => (is => 'ro', default => sub { localtime });
+has finish_time => (is => 'ro', lazy => 1, default => sub { localtime });
 
 sub run {
     my $self = shift;
@@ -112,6 +116,14 @@ sub run {
         }
 
         $self->logger->info('Mediators favorites fetching done!');
+    }
+
+    if ($self->opts->{statsd}) {
+        $Net::Statsd::HOST = '127.0.0.1';
+        Net::Statsd::gauge(
+            'devourer_twitter_fetch_duration',
+            $self->finish_time->epoch - $self->start_time->epoch
+        );
     }
 
     $self->logger->info('All done... I ate too much, I\'m full. :yum:');

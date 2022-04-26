@@ -11,3 +11,5 @@ requires 'Redis';
 requires 'Log::Dispatch';
 requires 'Clone';
 requires 'JSON';
+requires 'TokyoCabinet', url => 'https://dbmx.net/tokyocabinet/perlpkg/tokyocabinet-perl-1.34.tar.gz';
+requires 'Net::Statsd';
