@@ -57,9 +57,9 @@ has opts => (is => 'ro', default => sub {
         name => 'devourer fetch twitter',
         struct => [
             [[qw(init)], qq(Initialize Redis DB)],
-            [[qw(f no-fav)], qq(Do not fetch mediators favourites)],
-            [[qw(l no-list)], qq(Do not fetch list users statuses)],
-            [[qw(statsd)], qq(Send run duration metric as StatsD)]
+            [[qw(statsd)], qq(Send run duration metric as StatsD)],
+            [[qw(statsd-host)], qq(Specify StatsD host address)],
+            [[qw(statsd-port)], qq(Specify StatsD port)]
         ]
     )->opts;
 });
@@ -82,44 +82,44 @@ sub run {
         exit;
     }
 
-    if (!$self->opts->{'no-list'}) {
-        $self->logger->info('List members statuses fetching started!');
+    $self->logger->info('List members statuses fetching started!');
 
-        push(@{ $self->current_list_members }, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
-        $self->read_members->set($_, 1) for @{ $self->current_list_members };
-        my $list_members_max_num = @{ $self->current_list_members };
-        my $list_members_cur_num = 0;
-        while (my $member_ids_slice = [splice @{ $self->current_list_members }, 0, $self->nproc]) {
-            $list_members_cur_num += @$member_ids_slice;
-            $self->logger->info("$list_members_cur_num/$list_members_max_num members fetching...");
-            my $statuses = $self->_get_user_timelines($member_ids_slice);
-            my $media_urls = $self->_extract_file_name_and_url($statuses, $self->settings->{min_followers});
-            $self->_download($media_urls);
-            for (@$member_ids_slice) {
-                $self->stored_list_members->set($_, 1) unless $self->stored_list_members->get($_);
-            }
-            last unless @{ $self->current_list_members };
+    push(@{ $self->current_list_members }, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
+    $self->read_members->set($_, 1) for @{ $self->current_list_members };
+    my $list_members_max_num = @{ $self->current_list_members };
+    my $list_members_cur_num = 0;
+    while (my $member_ids_slice = [splice @{ $self->current_list_members }, 0, $self->nproc]) {
+        $list_members_cur_num += @$member_ids_slice;
+        $self->logger->info("$list_members_cur_num/$list_members_max_num members fetching...");
+        my $statuses = $self->_get_user_timelines($member_ids_slice);
+        my $media_urls = $self->_extract_file_name_and_url($statuses, $self->settings->{min_followers});
+        $self->_download($media_urls);
+        for (@$member_ids_slice) {
+            $self->stored_list_members->set($_, 1) unless $self->stored_list_members->get($_);
         }
-
-        $self->logger->info('List members statuses fetching done!');
+        last unless @{ $self->current_list_members };
     }
 
-    if (!$self->opts->{'no-fav'}) {
-        $self->logger->info('Mediators favorites fetching started!');
+    $self->logger->info('List members statuses fetching done!');
 
-        my $mediators = clone($self->settings->{mediators});
-        while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
-            my $statuses = $self->_get_users_favorites($mediators_slice);
-            my $media_urls = $self->_extract_file_name_and_url($statuses, 0);
-            $self->_download($media_urls);
-            last unless @$mediators;
-        }
 
-        $self->logger->info('Mediators favorites fetching done!');
+    $self->logger->info('Mediators statuses fetching started!');
+
+    my $mediators = clone($self->settings->{mediators});
+    while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
+        my $favs = $self->_get_users_favorites($mediators_slice);
+        my $statuses = $self->_get_user_timelines($mediators_slice);
+        push(@$statuses, @$favs);
+        my $media_urls = $self->_extract_file_name_and_url($statuses, 0);
+        $self->_download($media_urls);
+        last unless @$mediators;
     }
+
+    $self->logger->info('Mediators favorites fetching done!');
 
     if ($self->opts->{statsd}) {
-        $Net::Statsd::HOST = '127.0.0.1';
+        $Net::Statsd::HOST = $self->opts->{'statsd-host'} // '127.0.0.1';
+        $NET::Statsd::PORT = $self->opts->{'statsd-port'} // 8125;
         Net::Statsd::gauge(
             'devourer_twitter_fetch_duration',
             $self->finish_time->epoch - $self->start_time->epoch
