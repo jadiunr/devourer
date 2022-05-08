@@ -1,5 +1,0 @@
-docker-compose.override.yml
-settings.yml
-local/
-redis/
-media/**
