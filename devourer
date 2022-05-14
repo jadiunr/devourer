@@ -1,11 +1,42 @@
 #!/usr/bin/env perl
 
-use strict;
-use warnings;
-
+use Mojolicious::Lite -signatures;
 use FindBin;
 use lib "$FindBin::Bin/lib";
+use Devourer::MetaFetcher;
+use Devourer::Downloader;
+use Devourer::Container qw/con/;
 
-use Devourer::CLI;
+plugin Minion => {Pg => con('config')->{db}{minion}};
+plugin 'Minion::Admin' => {route => app->routes->any('/')};
 
-Devourer::CLI->run;
+con('pg')->auto_migrate(1)->migrations->name('devourer')->from_file("sql/migrations/pg.sql")->migrate;
+
+for my $service (keys %{ con('config')->{services} }) {
+    for my $component (keys %{ con('config')->{services}{$service}{components} }) {
+
+        my $task = "meta_fetch_${service}_${component}";
+        con('minion')->add_task($task => sub ($job, @args) {
+            if (con('minion')->jobs({states => ['active'], tasks => [$task]})->total > 1) {
+                return $job->finish("$task job is already active");
+            }
+            while (sleep 1) {
+                Devourer::MetaFetcher->new->run($service, $component);
+            }
+        });
+        con('minion')->enqueue($task);
+
+    }
+}
+
+con('minion')->add_task(notify => sub ($job, $url) {
+    Devourer::Notifier->new->run($url);
+});
+
+con('minion')->add_task(download => sub ($job, $service, $filename, $url) {
+    Devourer::Downloader->new->run($service, $filename, $url);
+});
+
+con('minion')->perform_jobs;
+
+app->start;

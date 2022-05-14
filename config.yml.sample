@@ -1,0 +1,32 @@
+logger:
+  path: ./log/devourer.log
+  level: info
+
+db:
+  devourer: postgresql://postgres:postgres@db/devourer
+  minion: postgresql://postgres:postgres@db/minion
+
+services:
+  twitter:
+    credentials:
+      consumer_key:
+      consumer_secret:
+      access_token:
+      access_token_secret:
+    notify:
+      allow_components:
+      - users
+    components:
+      lists:
+      - 
+      users:
+      - 
+      # bookmarks:
+      #   auto_add_to_list: true
+      # auto_mute: true
+
+notify:
+  service: discord
+  webhook_endpoint_url:
+
+outdir: media

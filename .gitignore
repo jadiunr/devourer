@@ -1,5 +1,7 @@
 docker-compose.override.yml
-settings.yml
-local/
-redis/
-media/**
+config.yml
+.carmel*/
+postgres*/
+media/*
+log/*
+!.keep

@@ -6,9 +6,7 @@ ENV TZ Asia/Tokyo
 ARG uid=1000
 ARG gid=1000
 
-RUN cpanm -nq Carton && \
-    apt -y update && \
-    apt -y install tokyocabinet-bin libtokyocabinet9 libtokyocabinet-dev && \
+RUN cpanm -nq Carmel && \
     useradd app -ms /bin/bash -u $uid && \
     groupmod -g $gid app
 USER app
