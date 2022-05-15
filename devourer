@@ -16,7 +16,7 @@ for my $service (keys %{ con('config')->{services} }) {
     for my $component (keys %{ con('config')->{services}{$service}{components} }) {
 
         my $task = "meta_fetch_${service}_${component}";
-        con('minion')->add_task($task => sub ($job, @args) {
+        app->minion->add_task($task => sub ($job, @args) {
             if (con('minion')->jobs({states => ['active'], tasks => [$task]})->total > 1) {
                 return $job->finish("$task job is already active");
             }
@@ -29,14 +29,14 @@ for my $service (keys %{ con('config')->{services} }) {
     }
 }
 
-con('minion')->add_task(notify => sub ($job, $url) {
+app->minion->add_task(notify => sub ($job, @args) {
+    my ($url) = @args;
     Devourer::Notifier->new->run($url);
 });
 
-con('minion')->add_task(download => sub ($job, $service, $filename, $url) {
+app->minion->add_task(download => sub ($job, @args) {
+    my ($service, $filename, $url) = @args;
     Devourer::Downloader->new->run($service, $filename, $url);
 });
-
-con('minion')->perform_jobs;
 
 app->start;

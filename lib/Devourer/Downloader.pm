@@ -5,6 +5,7 @@ use String::CamelCase qw/camelize/;
 use File::Path 'mkpath';
 use File::Basename qw/basename/;
 use Devourer::Container qw/con/;
+use Devourer::Models::SavedMediaFiles;
 
 has saved_media_files => sub {
     Devourer::Models::SavedMediaFiles->new;

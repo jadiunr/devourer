@@ -2,7 +2,10 @@ package Devourer::MetaFetcher::Services::Twitter;
 
 use Mojo::Base -base, -signatures, -async_await;
 use Twitter::API;
+use File::Basename qw/basename/;
 use Devourer::Container qw/con/;
+use Devourer::Models::Twitter::AlreadyReadListMembers;
+use Devourer::Models::Twitter::AlreadyReadUsers;
 
 has twitter_config => sub ($self) { con('config')->{services}{twitter} };
 has twitter_client => sub ($self) {
@@ -39,7 +42,7 @@ sub _get_user_timeline ($self, $user_id) {
     my $all_statuses;
     my $max_id;
     my $is_already_read_list_member = $self->already_read_list_members->get($user_id) ? 1 : undef;
-    for my $iter (1..16) {
+    for (1..16) {
         my $statuses = eval { $self->twitter_client->user_timeline({user_id => $user_id, count => 200, defined($max_id) ? (max_id => $max_id) : ()}) };
         last unless defined($statuses);
         my $screen_name = $statuses->[0]{user}{screen_name};
@@ -57,8 +60,24 @@ sub _get_user_timeline ($self, $user_id) {
     return $all_statuses;
 }
 
+sub _get_user_favorites ($self, $user_id) {
+    my $all_statuses;
+    my $max_id;
+    for (1..4) {
+        my $screen_name = eval { $self->twitter_client->lookup_users({user_id => [$user_id]})->[0]{screen_name} };
+        my $statuses = eval { $self->twitter_client->favorites({user_id => $user_id, count => 200, defined($max_id) ? (max_id => $max_id) : ()}) };
+        last unless defined($statuses);
+        push(@$all_statuses, @$statuses);
+        $max_id = $statuses->[-1]{id_str};
+        con('logger')->info('Got '. $screen_name. '\'s favorites. Next start with max_id='. $max_id);
+        last if scalar(@$statuses) <= 1;
+    }
+
+    return $all_statuses;
+}
+
 sub _extract_filename_and_url ($self, $statuses) {
-    my $component = (caller)[0];
+    my ($component) = split(/::/, (caller 1)[0]);
     my $media_info = {};
     for my $status (@$statuses) {
         my $media_array = $status->{extended_entities}{media};
@@ -97,7 +116,7 @@ sub _notify ($self, $status) {
     return if $self->already_read_list_members->get($user_id);
     return if $self->already_read_users->get($user_id);
 
-    con('minion')->enqueue(notify => "https://twitter.com/${user_screen_name}/status/${status_id}");
+    con('minion')->enqueue(notify => ["https://twitter.com/${user_screen_name}/status/${status_id}"]);
 }
 
 1;

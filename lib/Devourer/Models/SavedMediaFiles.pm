@@ -1,14 +1,17 @@
-package Devourer::Models::Twitter::SavedMediaFiles;
+package Devourer::Models::SavedMediaFiles;
 use Mojo::Base -base, -signatures;
+use Devourer::Container qw/con/;
 
 sub get ($self, $filename) {
-    return con('pg')->db->select('twitter_saved_media_files', ['id'], {filename => $filename})->hash->{id};
+    return con('pg')->db->select('saved_media_files', ['id'], {filename => $filename});
 };
 
 sub set ($self, $service, $filename, $filepath) {
-    return con('pg')->db->insert('twitter_saved_media_files', {
+    return con('pg')->db->insert('saved_media_files', {
         service_name => $service,
         filename => $filename,
         filepath => $filepath,
     });
 };
+
+1;
