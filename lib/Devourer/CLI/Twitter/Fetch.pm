@@ -139,7 +139,9 @@ sub _get_users_favorites {
     $pm->run_on_finish(sub {
         my $code = $_[1];
         my $all_statuses = $_[5];
-        push(@$users_favorites, @$all_statuses) if scalar(@$all_statuses) > 1;
+        return if !defined($all_statuses);
+        return if scalar(@$all_statuses) <= 1;
+        push(@$users_favorites, @$all_statuses);
     });
     for my $user (@$users) {
         $pm->start($user) and next;
