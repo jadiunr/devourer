@@ -58,8 +58,8 @@ has opts => (is => 'ro', default => sub {
         struct => [
             [[qw(init)], qq(Initialize Redis DB)],
             [[qw(statsd)], qq(Send run duration metric as StatsD)],
-            [[qw(statsd-host)], qq(Specify StatsD host address)],
-            [[qw(statsd-port)], qq(Specify StatsD port)]
+            [[qw(statsd-host)], qq(Specify StatsD host address), ':s'],
+            [[qw(statsd-port)], qq(Specify StatsD port), ':s'],
         ]
     )->opts;
 });
