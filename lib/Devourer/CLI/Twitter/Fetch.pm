@@ -97,8 +97,9 @@ sub run {
         $self->logger->info('Initializing Redis DB...');
         $self->stored_media_files->flushdb();
         $self->stored_media_files->set(basename($_), $_) for (split /\n/, `find @{[$self->settings->{outdir}]} -type f`);
-        $self->stored_list_members->flushdb();
-        $self->read_members->flushdb();
+        $self->all_list_members->flushdb();
+        $self->read_users->flushdb();
+        $self->redownload_list->flushdb();
         $self->logger->info('Initialize done!');
         exit;
     }
