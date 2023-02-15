@@ -1,8 +1,15 @@
 twitter:
-  consumer_key: 
-  consumer_secret: 
-  access_token: 
-  access_token_secret: 
+  primary_credentials:
+    use_v2_api: 0
+    consumer_key: 
+    consumer_secret: 
+    access_token: 
+    access_token_secret: 
+#  secondary_credentials:
+#    consumer_key: 
+#    consumer_secret: 
+#    access_token: 
+#    access_token_secret: 
 
 outdir: media
 
@@ -11,7 +18,5 @@ mediators:
 
 lists:
 - 
-
-min_followers: 100000
 
 discord_webhook_url: 

@@ -19,22 +19,44 @@ use Net::Statsd;
 
 has nproc => (is => 'ro', default => sub { chomp(my $nproc = `nproc --all`); $nproc });
 has logger => (is => 'ro', default => sub {
-    Log::Dispatch->new(
+    return Log::Dispatch->new(
         outputs => [['Screen', min_level => 'info', newline => 1]]
     );
 });
 has settings => (is => 'ro', default => sub { YAML::Tiny->read('./settings.yml')->[0] });
 has http => (is => 'ro', default => sub { Furl->new(); });
-has twitter => (is => 'ro', lazy => 1, default => sub {
+has twitter_primary => (is => 'ro', lazy => 1, default => sub {
     my $self = shift;
-    Twitter::API->new_with_traits(
+    return Twitter::API->new_with_traits(
         traits              => ['Enchilada', 'RateLimiting'],
-        api_version         => '2',
-        api_ext             => '',
-        consumer_key        => $self->settings->{twitter}{consumer_key},
-        consumer_secret     => $self->settings->{twitter}{consumer_secret},
-        access_token        => $self->settings->{twitter}{access_token},
-        access_token_secret => $self->settings->{twitter}{access_token_secret}
+        ($self->settings->{twitter}{primary_credentials}{use_v2_api} ? (api_version => "2") : ()),
+        ($self->settings->{twitter}{primary_credentials}{use_v2_api} ? (api_ext => "") : ()),
+        consumer_key        => $self->settings->{twitter}{primary_credentials}{consumer_key},
+        consumer_secret     => $self->settings->{twitter}{primary_credentials}{consumer_secret},
+        access_token        => $self->settings->{twitter}{primary_credentials}{access_token},
+        access_token_secret => $self->settings->{twitter}{primary_credentials}{access_token_secret},
+    );
+});
+has twitter_secondary => (is => 'ro', lazy => 1, default => sub {
+    my $self = shift;
+    if (
+        (
+            $self->settings->{twitter}{primary_credentials}{consumer_key}        eq $self->settings->{twitter}{secondary_credentials}{consumer_key}    and
+            $self->settings->{twitter}{primary_credentials}{consumer_secret}     eq $self->settings->{twitter}{secondary_credentials}{consumer_secret} and
+            $self->settings->{twitter}{primary_credentials}{access_token}        eq $self->settings->{twitter}{secondary_credentials}{access_token}    and
+            $self->settings->{twitter}{primary_credentials}{access_token_secret} eq $self->settings->{twitter}{secondary_credentials}{access_token_secret}
+        ) or !$self->settings->{twitter}{secondary_credentials}
+    ) {
+        return $self->twitter_primary;
+    }
+    return Twitter::API->new_with_traits(
+        traits              => ['Enchilada', 'RateLimiting'],
+        ($self->settings->{twitter}{secondary_credentials}{use_v2_api} ? (api_version => "2") : ()),
+        ($self->settings->{twitter}{secondary_credentials}{use_v2_api} ? (api_ext => "") : ()),
+        consumer_key        => $self->settings->{twitter}{secondary_credentials}{consumer_key},
+        consumer_secret     => $self->settings->{twitter}{secondary_credentials}{consumer_secret},
+        access_token        => $self->settings->{twitter}{secondary_credentials}{access_token},
+        access_token_secret => $self->settings->{twitter}{secondary_credentials}{access_token_secret},
     );
 });
 has current_list_members => (is => 'rw', default => sub { [] });
@@ -55,7 +77,7 @@ has redownload_list => (is => 'ro', default => sub {
     return $redis;
 });
 has opts => (is => 'ro', default => sub {
-    Getopt::Compact->new(
+    return Getopt::Compact->new(
         name => 'devourer fetch twitter',
         struct => [
             [[qw(init)], qq(Initialize Redis DB)],
@@ -85,7 +107,7 @@ sub run {
     $self->logger->info('List members statuses fetching started!');
 
     for my $list_id (@{ $self->settings->{lists} }) {
-        my $list_name = $self->twitter->get("lists/$list_id")->{data}{name};
+        my $list_name = $self->_get_list_name($list_id);
         my $total_list_members = 0;
         my $list_pagination_token;
         while (1) {
@@ -135,6 +157,93 @@ sub run {
     $self->logger->info('All done... I ate too much, I\'m full. :yum:');
 }
 
+sub _v2_shaping {
+    my ($self, $tweets) = @_;
+
+    my $ret = {};
+    for my $tweet (@$tweets) {
+        # v2 tweet
+        my $shaped_data = {};
+        if ($tweet->{retweeted_status}) {
+            $shaped_data->{author_id} = $tweet->{retweeted_status}{user}{id_str};
+            $shaped_data->{id} = $tweet->{retweeted_status}{id_str};
+        } else {
+            $shaped_data->{author_id} = $tweet->{user}{id_str};
+            $shaped_data->{id} = $tweet->{id_str};
+        }
+        if ($tweet->{extended_entities}{media}) {
+            for my $media (@{ $tweet->{extended_entities}{media} }) {
+                push(@{ $shaped_data->{attachments}{media_keys} }, $media->{id_str});
+            }
+        }
+        push(@{ $ret->{data} }, $shaped_data);
+
+        # v2 referenced_tweet
+        my $shaped_tweet = {};
+        if ($tweet->{retweeted_status}) {
+            $shaped_tweet->{author_id} = $tweet->{retweeted_status}{user}{id_str};
+            $shaped_tweet->{id} = $tweet->{retweeted_status}{id_str};
+            if ($tweet->{extended_entities}{media}) {
+                for my $media (@{ $tweet->{extended_entities}{media} }) {
+                    push(@{ $shaped_tweet->{attachments}{media_keys} }, $media->{id_str});
+                }
+            }
+            push(@{ $ret->{includes}{tweets} }, $shaped_tweet);
+        }
+
+        # v2 user
+        my $shaped_user = {};
+        if ($tweet->{retweeted_status}) {
+            $shaped_user->{id} = $tweet->{retweeted_status}{user}{id_str};
+            $shaped_user->{username} = $tweet->{retweeted_status}{user}{screen_name};
+        } else {
+            $shaped_user->{id} = $tweet->{user}{id_str};
+            $shaped_user->{username} = $tweet->{user}{screen_name};
+        }
+        push(@{ $ret->{includes}{users} }, $shaped_user);
+
+        # v2 media
+        my $shaped_media = {};
+        if ($tweet->{extended_entities}{media}) {
+            for my $media (@{ $tweet->{extended_entities}{media} }) {
+                $shaped_media->{media_key} = $media->{id_str};
+                $shaped_media->{type} = $media->{type};
+                if ($media->{type} eq 'photo') {
+                    $shaped_media->{url} = $media->{media_url};
+                } elsif ($media->{type} eq 'video') {
+                    $shaped_media->{variants} = $media->{video_info}{variants};
+                }
+                push(@{ $ret->{includes}{media} }, $shaped_media);
+            }
+        }
+    }
+
+    # v2 pagination_token and oldest_id
+    if (scalar(@$tweets) <= 2) {
+        $ret->{meta}{next_token} = undef;
+        $ret->{meta}{oldest_id} = undef
+    } else {
+        $ret->{meta}{next_token} = $tweets->[-1]{id_str};
+        $ret->{meta}{oldest_id} = $tweets->[-1]{id_str};
+    }
+
+    return $ret;
+}
+
+sub _get_user_favorites {
+    my ($self, $user_id, $pagination_token) = @_;
+
+    if ($self->settings->{twitter}{primary_credentials}{use_v2_api}) {
+        my $pagination_param = defined($pagination_token) ? "&pagination_token=$pagination_token" : "";
+        my $ret = $self->twitter_primary->get("users/$user_id/liked_tweets?expansions=author_id,referenced_tweets.id,attachments.media_keys,referenced_tweets.id.author_id&media.fields=url,variants&max_results=100$pagination_param");
+        return $ret;
+    } else {
+        my $pagination_param = defined($pagination_token) ? { max_id => $pagination_token } : {};
+        my $tweets = $self->twitter_primary->favorites({ user_id => $user_id, count => 200, %$pagination_param });
+        return $self->_v2_shaping($tweets);
+    }
+}
+
 sub _get_users_favorites {
     my ($self, $users_id) = @_;
 
@@ -152,12 +261,10 @@ sub _get_users_favorites {
         $pm->start($user_id) and next;
         my $all_objects = {};
         my $pagination_token;
-        my $user_name = eval { $self->twitter->get("users/$user_id")->{username} };
-        last if $@;
+        my $user_name = $self->_get_user_screen_name($user_id);
         last unless $user_name;
         while (1) {
-            my $pagination_param = defined($pagination_token) ? "&pagination_token=$pagination_token" : "";
-            my $res = eval { $self->twitter->get("users/$user_id/liked_tweets?expansions=author_id,referenced_tweets.id,attachments.media_keys,referenced_tweets.id.author_id&media.fields=url,variants&max_results=100$pagination_param") };
+            my $res = eval { $self->_get_user_favorites($user_id, $pagination_token) };
             last if $@;
             last unless $res->{data};
             push(@{ $all_objects->{tweets} }, @{ $res->{data} });
@@ -177,6 +284,30 @@ sub _get_users_favorites {
     return $users_favorites;
 }
 
+sub _get_user_screen_name {
+    my ($self, $user_id) = @_;
+
+    if ($self->settings->{twitter}{primary_credentials}{use_v2_api}) {
+        return $self->twitter_primary->get("users/$user_id")->{data}{username};
+    } else {
+        return $self->twitter_primary->show_user({ user_id => $user_id })->{screen_name};
+    }
+}
+
+sub _get_user_timeline {
+    my ($self, $user_id, $pagination_token) = @_;
+
+    if ($self->settings->{twitter}{secondary_credentials}{use_v2_api}) {
+        my $pagination_param = defined($pagination_token) ? "&pagination_token=$pagination_token" : "";
+        my $ret = $self->twitter_secondary->get("users/$user_id/tweets?expansions=author_id,referenced_tweets.id,attachments.media_keys,referenced_tweets.id.author_id&media.fields=url,variants&max_results=100$pagination_param");
+        return $ret;
+    } else {
+        my $pagination_param = defined($pagination_token) ? { max_id => $pagination_token } : {};
+        my $tweets = $self->twitter_secondary->user_timeline({ user_id => $user_id, count => 200, %$pagination_param });
+        return $self->_v2_shaping($tweets);
+    }
+}
+
 sub _get_user_timelines {
     my ($self, $user_ids) = @_;
 
@@ -194,17 +325,15 @@ sub _get_user_timelines {
         $pm->start($user_id) and next;
         my $all_objects = {};
         my $pagination_token;
-        my $user_name = eval { $self->twitter->get("users/$user_id")->{data}{username} };
-        last if $@;
+        my $user_name = $self->_get_user_screen_name($user_id);
         last unless $user_name;
         my $is_stored_member = $self->stored_list_members->get($user_id) ? 1 : undef;
-        my $loop_count = 0;
+        my $tweets_count = 0;
         while (1) {
-            $loop_count++;
-            my $pagination_param = defined($pagination_token) ? "&pagination_token=$pagination_token" : "";
-            my $res = eval { $self->twitter->get("users/$user_id/tweets?expansions=author_id,referenced_tweets.id,attachments.media_keys,referenced_tweets.id.author_id&media.fields=url,variants&max_results=100$pagination_param") };
+            my $res = eval { $self->_get_user_timeline($user_id, $pagination_token) };
             last if $@;
             last unless $res->{data};
+            $tweets_count += scalar(@{ $res->{data} });
             push(@{ $all_objects->{tweets} }, @{ $res->{data} });
             push(@{ $all_objects->{referenced_tweets} }, @{ $res->{includes}{tweets} }) if $res->{includes}{tweets};
             push(@{ $all_objects->{users}  }, @{ $res->{includes}{users} })  if $res->{includes}{users};
@@ -213,10 +342,10 @@ sub _get_user_timelines {
             $pagination_token = $res->{meta}{next_token};
             my $oldest_id = $res->{meta}{oldest_id};
             if ($is_stored_member) {
-                last if $loop_count >= 2;
+                last if $tweets_count >= 200;
                 $self->logger->info("Got $user_name ($user_id)'s tweets. Next start with oldest_id=$oldest_id");
             } else {
-                last if $loop_count >= 32;
+                last if $tweets_count >= 3200;
                 $self->logger->info("Got $user_name ($user_id)'s tweets. Next start with oldest_id=$oldest_id");
             }
         }
@@ -229,16 +358,31 @@ sub _get_user_timelines {
     return $users_timeline;
 }
 
+sub _get_list_name {
+    my ($self, $list_id) = @_;
+
+    if ($self->settings->{twitter}{primary_credentials}{use_v2_api}) {
+        return $self->twitter_primary->get("lists/$list_id")->{data}{name};
+    } else {
+        return $self->twitter_primary->show_list({ list_id => $list_id })->{name};
+    }
+}
+
 sub _get_list_members_id {
     my ($self, $list_id, $pagination_token) = @_;
 
-    my $pagination_param = defined($pagination_token) ? "&pagination_token=$pagination_token" : "";
-    my $list_members = $self->twitter->get("lists/$list_id/members?max_results=100$pagination_param")->{data};
-    my $members_id = [map { $_->{id} } @$list_members];
-
-    $self->logger->info('Got '. scalar(@$members_id). ' members id.');
-
-    return $members_id;
+    if ($self->settings->{twitter}{primary_credentials}{use_v2_api}) {
+        my $pagination_param = defined($pagination_token) ? "&pagination_token=$pagination_token" : "";
+        my $list_members = $self->twitter_primary->get("lists/$list_id/members?max_results=100$pagination_param");
+        my $members_id = [map { $_->{id} } @{ $list_members->{data} }];
+        $pagination_token = $list_members->{meta}{next_token};
+        return ($members_id, $pagination_token);
+    } else {
+        my $list_members = $self->twitter_primary->list_members({list_id => $list_id, count => 5000})->{users};
+        my $members_id = [map { $_->{id_str} } @$list_members];
+        $pagination_token = undef;
+        return ($members_id, $pagination_token);
+    }
 }
 
 sub _extract_file_name_and_url {
