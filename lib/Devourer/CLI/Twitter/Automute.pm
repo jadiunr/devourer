@@ -15,45 +15,68 @@ has twitter => (is => 'ro', lazy => 1, default => sub {
     my $self = shift;
     Twitter::API->new_with_traits(
         traits              => ['Enchilada', 'RateLimiting'],
-        consumer_key        => $self->settings->{twitter}{consumer_key},
-        consumer_secret     => $self->settings->{twitter}{consumer_secret},
-        access_token        => $self->settings->{twitter}{access_token},
-        access_token_secret => $self->settings->{twitter}{access_token_secret}
+        ($self->settings->{twitter}{primary_credentials}{use_v2_api} ? (api_version => "2") : ()),
+        ($self->settings->{twitter}{primary_credentials}{use_v2_api} ? (api_ext => "") : ()),
+        consumer_key        => $self->settings->{twitter}{primary_credentials}{consumer_key},
+        consumer_secret     => $self->settings->{twitter}{primary_credentials}{consumer_secret},
+        access_token        => $self->settings->{twitter}{primary_credentials}{access_token},
+        access_token_secret => $self->settings->{twitter}{primary_credentials}{access_token_secret}
     );
 });
 
 sub run {
     my $self = shift;
-    my $list_members = [];
-    push(@$list_members, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
-    my $muted_users = [];
-    my $next_cursor = 0;
-    do {
-        my $mutes = $self->twitter->mutes({stringify_ids => '1', cursor => $next_cursor});
-        push(@$muted_users, @{ $mutes->{ids} });
-        $next_cursor = $mutes->{next_cursor_str};
-    } while ($next_cursor);
 
+    my $self_user_id = $self->settings->{twitter}{self_user_id};
+    my $list_members = [];
+    my $muted_users = [];
+
+    # Fetch all list members
+    my $count = 0;
+    while (my $list_members_slice = $self->all_list_members->scan($count, 'count', 1000)) {
+        push(@$list_members, @{ $list_members_slice->[1] });
+        last if $list_members_slice->[0] eq "0";
+        $count = $list_members_slice->[0];
+    }
+
+    # Fetch all muted users
+    my $pagination_token;
+    while (1) {
+        if ($self->settings->{twitter}{primary_credentials}{use_v2_api}) {
+            my $pagination_param = defined($pagination_token) ? "&pagination_token=$pagination_token" : "";
+            my $res = $self->twitter->get("users/$self_user_id/muting?max_results=1000$pagination_param");
+            last unless $res->{data};
+            push(@$muted_users, (map { $_->{id} } @{ $res->{data} }));
+            last unless $res->{meta}{next_token};
+            $pagination_token = $res->{meta}{next_token};
+        } else {
+            $pagination_token = 0 unless defined($pagination_token);
+            my $res = $self->twitter->mutes({stringify_ids => '1', cursor => $next_cursor});
+            last unless $res->{ids};
+            push(@$muted_users, @{ $res->{ids} });
+            last unless $res->{next_cursor_str}
+            $pagination_token = $res->{next_cursor_str};
+        }
+    }
+
+    # Extract unmuted users
     for my $muted_user (@$muted_users) {
         my ($index) = grep { $muted_user eq $list_members->[$_] } 0..scalar(@$list_members)-1;
         splice(@$list_members, $index, 1) if defined($index);
     }
+
+    # Create muting
     for (@$list_members) {
-        $self->twitter->create_mute({user_id => $_});
-        $self->logger->info("Muted: $_");
-        sleep 1;
+        if ($self->settings->{twitter}{primary_credentials}{use_v2_api}) {
+            my $res = $self->twitter->post("users/$self_user_id/muting?target_user_id=$_");
+            $self->logger->info("Mute succeeded: $_") if $res->{data}{muting};
+            $self->logger->warn("Mute failed: $_") unless $res->{data}{muting};
+        } else {
+            my $res = $self->twitter->create_mute({user_id => $_});
+            $self->logger->info("Mute succeeded: $_") if $res->{muting};
+            $self->logger->warn("Mute failed: $_") unless $res->{muting};
+        }
     }
-}
-
-sub _get_list_members {
-    my ($self, $list_id) = @_;
-
-    my $members = $self->twitter->list_members({list_id => $list_id, count => 5000})->{users};
-    my $member_ids = [map { $_->{id_str} } @$members];
-
-    $self->logger->info('Got '. scalar(@$member_ids). ' members screen name.');
-
-    return $member_ids;
 }
 
 1;
