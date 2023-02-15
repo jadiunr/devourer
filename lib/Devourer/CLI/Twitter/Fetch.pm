@@ -59,14 +59,13 @@ has twitter_secondary => (is => 'ro', lazy => 1, default => sub {
         access_token_secret => $self->settings->{twitter}{secondary_credentials}{access_token_secret},
     );
 });
-has current_list_members => (is => 'rw', default => sub { [] });
 has stored_media_files => (is => 'ro', default => sub { Redis->new(server => 'redis:6379'); });
-has stored_list_members => (is => 'ro', default => sub {
+has all_list_members => (is => 'ro', default => sub {
     my $redis = Redis->new(server => 'redis:6379');
     $redis->select(1);
     return $redis;
 });
-has read_members => (is => 'ro', default => sub {
+has read_users => (is => 'ro', default => sub {
     my $redis = Redis->new(server => 'redis:6379');
     $redis->select(2);
     return $redis;
@@ -104,32 +103,41 @@ sub run {
         exit;
     }
 
+    # Fetch process from lists
     $self->logger->info('List members statuses fetching started!');
-
+    my $pm = Parallel::ForkManager->new($self->nproc);
     for my $list_id (@{ $self->settings->{lists} }) {
+        $pm->start($list_id) and next;
         my $list_name = $self->_get_list_name($list_id);
         my $total_list_members = 0;
         my $list_pagination_token;
         while (1) {
             (my $list_members_id, $list_pagination_token) = eval { $self->_get_list_members_id($list_id, $list_pagination_token) };
-            last if $@ or !defined($list_members_id);
+            last if $@ or !defined($list_pagination_token);
             my $list_members_num = scalar(@$list_members_id);
             $total_list_members += $list_members_num;
-            $self->logger->info("Total $total_list_members members fetching from list $list_id ($list_name)");
-            my $tweets = $self->_get_user_timelines($list_members_id);
-            my $media_urls = $self->_extract_file_name_and_url($tweets);
-            $self->_download($media_urls);
             for (@$list_members_id) {
-                $self->stored_list_members->set($_, 1) unless $self->stored_list_members->get($_);
+                $self->all_list_members->set($_, 0);
             }
+            $self->logger->info("Total $total_list_members members fetched from list $list_id ($list_name)");
         }
-        $self->logger->info("Total $total_list_members members fetched from list $list_id ($list_name)");
+        $pm->finish;
     }
+    $pm->wait_all_children;
 
+    my $count = 0;
+    while (my $list_members = $self->all_list_members->scan($count, 'count', $self->nproc)) {
+        my $tweets = $self->_get_user_timelines($list_members->[1]);
+        my $media_urls = $self->_extract_file_name_and_url($tweets, 'list_members');
+        $self->_download($media_urls);
+        $self->all_list_members->set($_, 1) for @{ $list_members->[1] };
+        last if $list_members->[0] eq "0";
+        $count = $list_members->[0];
+    }
     $self->logger->info('List members statuses fetching done!');
 
+    # Fetch process from mediator's favorites
     $self->logger->info('Mediators statuses fetching started!');
-
     my $mediators = clone($self->settings->{mediators});
     while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
         my $favs = $self->_get_users_favorites($mediators_slice);
@@ -138,13 +146,14 @@ sub run {
         push(@{ $tweets->{tweets} }, @{ $favs->{tweets} }) if $tweets->{tweets} and $favs->{tweets};
         push(@{ $tweets->{users}  }, @{ $favs->{users} })  if $tweets->{users}  and $favs->{users};;
         push(@{ $tweets->{media}  }, @{ $favs->{media} })  if $tweets->{media}  and $favs->{media};;
-        my $media_urls = $self->_extract_file_name_and_url($tweets);
+        my $media_urls = $self->_extract_file_name_and_url($tweets, 'mediators');
         $self->_download($media_urls);
         last unless @$mediators;
     }
 
     $self->logger->info('Mediators favorites fetching done!');
 
+    # Send StatsD metrics
     if ($self->opts->{statsd}) {
         $Net::Statsd::HOST = $self->opts->{'statsd-host'} // '127.0.0.1';
         $NET::Statsd::PORT = $self->opts->{'statsd-port'} // 8125;
@@ -263,7 +272,7 @@ sub _get_users_favorites {
         my $pagination_token;
         my $user_name = $self->_get_user_screen_name($user_id);
         last unless $user_name;
-        while (1) {
+        for (1..8) {
             my $res = eval { $self->_get_user_favorites($user_id, $pagination_token) };
             last if $@;
             last unless $res->{data};
@@ -273,13 +282,13 @@ sub _get_users_favorites {
             push(@{ $all_objects->{media}  }, @{ $res->{includes}{media} })  if $res->{includes}{media};
             last unless $res->{meta}{next_token};
             $pagination_token = $res->{meta}{next_token};
-            $self->logger->info('Got '. $user_name. '\'s favorites. Continuing...');
+            $self->logger->info('Got '. $user_name. ' favorites. next_token='. $pagination_token);
         }
         $pm->finish(0, $all_objects);
     }
     $pm->wait_all_children;
 
-    $self->logger->info('Got all '. scalar(@$users_id). ' users '. scalar(@$users_favorites). ' favorites.');
+    $self->logger->info('Got all '. scalar(@$users_id). ' users '. scalar(@{ $users_favorites->{tweets} }). ' favorites.');
 
     return $users_favorites;
 }
@@ -327,7 +336,7 @@ sub _get_user_timelines {
         my $pagination_token;
         my $user_name = $self->_get_user_screen_name($user_id);
         last unless $user_name;
-        my $is_stored_member = $self->stored_list_members->get($user_id) ? 1 : undef;
+        my $is_full_read_already = $self->all_list_members->get($user_id);
         my $tweets_count = 0;
         while (1) {
             my $res = eval { $self->_get_user_timeline($user_id, $pagination_token) };
@@ -341,7 +350,7 @@ sub _get_user_timelines {
             last unless $res->{meta}{next_token};
             $pagination_token = $res->{meta}{next_token};
             my $oldest_id = $res->{meta}{oldest_id};
-            if ($is_stored_member) {
+            if ($is_full_read_already) {
                 last if $tweets_count >= 200;
                 $self->logger->info("Got $user_name ($user_id)'s tweets. Next start with oldest_id=$oldest_id");
             } else {
@@ -386,7 +395,7 @@ sub _get_list_members_id {
 }
 
 sub _extract_file_name_and_url {
-    my ($self, $all_objects) = @_;
+    my ($self, $all_objects, $fetched_from) = @_;
     my $media_info = {};
     for my $media (@{ $all_objects->{media} }) {
         my $author_id;
@@ -409,10 +418,14 @@ sub _extract_file_name_and_url {
             }
         }
 
+        if ($fetched_from eq 'mediators') {
+            $self->_notify_to_slack_if_not_read_yet($author_id, $tweet_id);
+        }
+
         if ($media->{type} eq 'photo') {
             my $url = $media->{url};
             my $filename = $author_id."-".$tweet_id."-".basename($url);
-            next if $self->stored_media_files->get($filename);
+            next if $self->stored_media_files->exists($filename);
             $media_info->{$filename} = $url. '?name=orig';
         } elsif ($media->{type} eq 'video') {
             my $video_variants = $media->{variants};
@@ -420,7 +433,7 @@ sub _extract_file_name_and_url {
             my $url = (sort { $b->{bitrate} <=> $a->{bitrate} } @$video_variants)[0]{url};
             $url =~ s/\?.+//;
             my $filename = $author_id."-".$tweet_id."-".basename($url);
-            next if $self->stored_media_files->get($filename);
+            next if $self->stored_media_files->exists($filename);
             $media_info->{$filename} = $url;
         }
     }
@@ -433,15 +446,10 @@ sub _extract_file_name_and_url {
 }
 
 sub _notify_to_slack_if_not_read_yet {
-    my ($self, $status) = @_;
-    my $orig_status = $status->{retweeted_status} ? $status->{retweeted_status} : $status;
-    my $user_id = $orig_status->{user}{id_str};
-    my $user_screen_name = $orig_status->{user}{screen_name};
-    my $status_id = $orig_status->{id_str};
+    my ($self, $author_id, $tweet_id) = @_;
 
-    return if grep {$user_id eq $_} @{ $self->current_list_members };
-    return if $self->stored_list_members->get($user_id);
-    return if $self->read_members->get($user_id);
+    return if $self->all_list_members->exists($author_id);
+    return if $self->read_users->exists($author_id);
 
     if ($self->settings->{discord_webhook_url}) {
         my $try = 0;
@@ -449,7 +457,7 @@ sub _notify_to_slack_if_not_read_yet {
             my $res = $self->http->post(
                 $self->settings->{discord_webhook_url},
                 [],
-                [ content => "https://twitter.com/$user_screen_name/status/$status_id" ]
+                [ content => "https://twitter.com/$author_id/status/$tweet_id" ]
             );
             if ($res->code !~ /^2/) {
                 if ($try++ < 512) {
@@ -465,7 +473,7 @@ sub _notify_to_slack_if_not_read_yet {
 
     if ($self->settings->{slack_webhook_url}) {
         my $payload = encode_json({
-            text => "https://twitter.com/$user_screen_name/status/$status_id"
+            text => "https://twitter.com/$author_id/status/$tweet_id"
         });
 
         my $res = $self->http->post(
@@ -477,7 +485,7 @@ sub _notify_to_slack_if_not_read_yet {
         print("Slack notified: return code ". $res->code. "\n");
     }
 
-    $self->read_members->set($user_id, 1);
+    $self->read_users->set($author_id, 1);
 }
 
 sub _download {
@@ -494,7 +502,7 @@ sub _download {
         });
         for my $filename (@$filename_slice) {
             $pm->start and next;
-            if ($self->stored_media_files->get($filename)) {
+            if ($self->stored_media_files->exists($filename)) {
                 $self->logger->info($filename. ' is already stored.');
                 $pm->finish(-1, [$filename, undef]);
             }
@@ -504,7 +512,7 @@ sub _download {
                 $self->redownload_list->set($filename, $media_urls->{$filename}) if ($res->code =~ /^5/ or $res->code == 429);
                 $pm->finish(-1, [$filename, undef]);
             }
-            $self->redownload_list->del($filename) if $self->redownload_list->get($filename);
+            $self->redownload_list->del($filename) if $self->redownload_list->exists($filename);
             $self->logger->info("Media file downloaded: $filename ($media_urls->{$filename})");
             $pm->finish(0, [$filename, $res]);
         }
