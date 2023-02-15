@@ -29,6 +29,8 @@ has twitter => (is => 'ro', lazy => 1, default => sub {
     my $self = shift;
     Twitter::API->new_with_traits(
         traits              => ['Enchilada', 'RateLimiting'],
+        api_version         => '2',
+        api_ext             => '',
         consumer_key        => $self->settings->{twitter}{consumer_key},
         consumer_secret     => $self->settings->{twitter}{consumer_secret},
         access_token        => $self->settings->{twitter}{access_token},
@@ -69,8 +71,6 @@ has finish_time => (is => 'ro', lazy => 1, default => sub { localtime });
 sub run {
     my $self = shift;
 
-    $self->_logging_rate_limit_status();
-
     # Init Redis
     if ($self->opts->{init}) {
         $self->logger->info('Initializing Redis DB...');
@@ -84,33 +84,39 @@ sub run {
 
     $self->logger->info('List members statuses fetching started!');
 
-    push(@{ $self->current_list_members }, @{ $self->_get_list_members($_) }) for @{ $self->settings->{lists} };
-    $self->read_members->set($_, 1) for @{ $self->current_list_members };
-    my $list_members_max_num = @{ $self->current_list_members };
-    my $list_members_cur_num = 0;
-    while (my $member_ids_slice = [splice @{ $self->current_list_members }, 0, $self->nproc]) {
-        $list_members_cur_num += @$member_ids_slice;
-        $self->logger->info("$list_members_cur_num/$list_members_max_num members fetching...");
-        my $statuses = $self->_get_user_timelines($member_ids_slice);
-        my $media_urls = $self->_extract_file_name_and_url($statuses, $self->settings->{min_followers});
-        $self->_download($media_urls);
-        for (@$member_ids_slice) {
-            $self->stored_list_members->set($_, 1) unless $self->stored_list_members->get($_);
+    for my $list_id (@{ $self->settings->{lists} }) {
+        my $list_name = $self->twitter->get("lists/$list_id")->{data}{name};
+        my $total_list_members = 0;
+        my $list_pagination_token;
+        while (1) {
+            (my $list_members_id, $list_pagination_token) = eval { $self->_get_list_members_id($list_id, $list_pagination_token) };
+            last if $@ or !defined($list_members_id);
+            my $list_members_num = scalar(@$list_members_id);
+            $total_list_members += $list_members_num;
+            $self->logger->info("Total $total_list_members members fetching from list $list_id ($list_name)");
+            my $tweets = $self->_get_user_timelines($list_members_id);
+            my $media_urls = $self->_extract_file_name_and_url($tweets);
+            $self->_download($media_urls);
+            for (@$list_members_id) {
+                $self->stored_list_members->set($_, 1) unless $self->stored_list_members->get($_);
+            }
         }
-        last unless @{ $self->current_list_members };
+        $self->logger->info("Total $total_list_members members fetched from list $list_id ($list_name)");
     }
 
     $self->logger->info('List members statuses fetching done!');
-
 
     $self->logger->info('Mediators statuses fetching started!');
 
     my $mediators = clone($self->settings->{mediators});
     while (my $mediators_slice = [splice @$mediators, 0, $self->nproc]) {
         my $favs = $self->_get_users_favorites($mediators_slice);
-        my $statuses = $self->_get_user_timelines($mediators_slice);
-        push(@$statuses, @$favs);
-        my $media_urls = $self->_extract_file_name_and_url($statuses, 0);
+        my $tweets = $self->_get_user_timelines($mediators_slice);
+        push(@{ $tweets->{referenced_tweets} }, @{ $favs->{referenced_tweets} }) if $tweets->{referenced_tweets} and $favs->{referenced_tweets};
+        push(@{ $tweets->{tweets} }, @{ $favs->{tweets} }) if $tweets->{tweets} and $favs->{tweets};
+        push(@{ $tweets->{users}  }, @{ $favs->{users} })  if $tweets->{users}  and $favs->{users};;
+        push(@{ $tweets->{media}  }, @{ $favs->{media} })  if $tweets->{media}  and $favs->{media};;
+        my $media_urls = $self->_extract_file_name_and_url($tweets);
         $self->_download($media_urls);
         last unless @$mediators;
     }
@@ -130,35 +136,43 @@ sub run {
 }
 
 sub _get_users_favorites {
-    my ($self, $users) = @_;
-
-    $self->_logging_rate_limit_status();
+    my ($self, $users_id) = @_;
 
     my $pm = Parallel::ForkManager->new($self->nproc);
-    my $users_favorites;
+    my $users_favorites = {};
     $pm->run_on_finish(sub {
         my $code = $_[1];
-        my $all_statuses = $_[5];
-        return if !defined($all_statuses);
-        return if scalar(@$all_statuses) <= 1;
-        push(@$users_favorites, @$all_statuses);
+        my $all_objects = $_[5];
+        push(@{ $users_favorites->{referenced_tweets} }, @{ $all_objects->{referenced_tweets} }) if $all_objects->{referenced_tweets};
+        push(@{ $users_favorites->{tweets} }, @{ $all_objects->{tweets} }) if $all_objects->{tweets};
+        push(@{ $users_favorites->{users}  }, @{ $all_objects->{users} })  if $all_objects->{users};
+        push(@{ $users_favorites->{media}  }, @{ $all_objects->{media} })  if $all_objects->{media};
     });
-    for my $user (@$users) {
-        $pm->start($user) and next;
-        my $all_statuses;
-        my $max_id;
-        for my $iter (1..4) {
-            my $statuses = $self->twitter->favorites({screen_name => $user, count => 200, defined($max_id) ? (max_id => $max_id) : ()});
-            last if scalar(@$statuses) <= 1;
-            push(@$all_statuses, @$statuses);
-            $max_id = $statuses->[-1]{id_str};
-            $self->logger->info('Got '. $user. '\'s favorites. Next start with max_id='. $max_id);
+    for my $user_id (@$users_id) {
+        $pm->start($user_id) and next;
+        my $all_objects = {};
+        my $pagination_token;
+        my $user_name = eval { $self->twitter->get("users/$user_id")->{username} };
+        last if $@;
+        last unless $user_name;
+        while (1) {
+            my $pagination_param = defined($pagination_token) ? "&pagination_token=$pagination_token" : "";
+            my $res = eval { $self->twitter->get("users/$user_id/liked_tweets?expansions=author_id,referenced_tweets.id,attachments.media_keys,referenced_tweets.id.author_id&media.fields=url,variants&max_results=100$pagination_param") };
+            last if $@;
+            last unless $res->{data};
+            push(@{ $all_objects->{tweets} }, @{ $res->{data} });
+            push(@{ $all_objects->{referenced_tweets} }, @{ $res->{includes}{tweets} }) if $res->{includes}{tweets};
+            push(@{ $all_objects->{users}  }, @{ $res->{includes}{users} })  if $res->{includes}{users};
+            push(@{ $all_objects->{media}  }, @{ $res->{includes}{media} })  if $res->{includes}{media};
+            last unless $res->{meta}{next_token};
+            $pagination_token = $res->{meta}{next_token};
+            $self->logger->info('Got '. $user_name. '\'s favorites. Continuing...');
         }
-        $pm->finish(0, $all_statuses);
+        $pm->finish(0, $all_objects);
     }
     $pm->wait_all_children;
 
-    $self->logger->info('Got all '. scalar(@$users). ' users '. scalar(@$users_favorites). ' favorites.');
+    $self->logger->info('Got all '. scalar(@$users_id). ' users '. scalar(@$users_favorites). ' favorites.');
 
     return $users_favorites;
 }
@@ -166,125 +180,116 @@ sub _get_users_favorites {
 sub _get_user_timelines {
     my ($self, $user_ids) = @_;
 
-    $self->_logging_rate_limit_status();
-
     my $pm = Parallel::ForkManager->new($self->nproc);
-    my $users_timeline;
+    my $users_timeline = {};
     $pm->run_on_finish(sub {
         my $code = $_[1];
-        my $all_statuses = $_[5];
-        return unless defined($all_statuses);
-        push(@$users_timeline, @$all_statuses) if scalar(@$all_statuses) > 1;
+        my $all_objects = $_[5];
+        push(@{ $users_timeline->{referenced_tweets} }, @{ $all_objects->{referenced_tweets} }) if $all_objects->{referenced_tweets};
+        push(@{ $users_timeline->{tweets} }, @{ $all_objects->{tweets} }) if $all_objects->{tweets};
+        push(@{ $users_timeline->{users}  }, @{ $all_objects->{users} })  if $all_objects->{users};
+        push(@{ $users_timeline->{media}  }, @{ $all_objects->{media} })  if $all_objects->{media};
     });
     for my $user_id (@$user_ids) {
-        $pm->start and next;
-        my $all_statuses;
-        my $max_id;
+        $pm->start($user_id) and next;
+        my $all_objects = {};
+        my $pagination_token;
+        my $user_name = eval { $self->twitter->get("users/$user_id")->{data}{username} };
+        last if $@;
+        last unless $user_name;
         my $is_stored_member = $self->stored_list_members->get($user_id) ? 1 : undef;
-        for my $iter (1..16) {
-            my $statuses = eval { $self->twitter->user_timeline({user_id => $user_id, count => 200, defined($max_id) ? (max_id => $max_id) : ()}) };
-            last unless defined($statuses);
-            my $screen_name = $statuses->[0]{user}{screen_name};
-            push(@$all_statuses, @$statuses);
-            $max_id = $statuses->[-1]{id_str};
+        my $loop_count = 0;
+        while (1) {
+            $loop_count++;
+            my $pagination_param = defined($pagination_token) ? "&pagination_token=$pagination_token" : "";
+            my $res = eval { $self->twitter->get("users/$user_id/tweets?expansions=author_id,referenced_tweets.id,attachments.media_keys,referenced_tweets.id.author_id&media.fields=url,variants&max_results=100$pagination_param") };
+            last if $@;
+            last unless $res->{data};
+            push(@{ $all_objects->{tweets} }, @{ $res->{data} });
+            push(@{ $all_objects->{referenced_tweets} }, @{ $res->{includes}{tweets} }) if $res->{includes}{tweets};
+            push(@{ $all_objects->{users}  }, @{ $res->{includes}{users} })  if $res->{includes}{users};
+            push(@{ $all_objects->{media}  }, @{ $res->{includes}{media} })  if $res->{includes}{media};
+            last unless $res->{meta}{next_token};
+            $pagination_token = $res->{meta}{next_token};
+            my $oldest_id = $res->{meta}{oldest_id};
             if ($is_stored_member) {
-                $self->logger->info("Got $screen_name ($user_id)'s statuses");
-                last;
+                last if $loop_count >= 2;
+                $self->logger->info("Got $user_name ($user_id)'s tweets. Next start with oldest_id=$oldest_id");
             } else {
-                $self->logger->info("Got $screen_name ($user_id)'s statuses. Next start with max_id=$max_id");
+                last if $loop_count >= 32;
+                $self->logger->info("Got $user_name ($user_id)'s tweets. Next start with oldest_id=$oldest_id");
             }
-            last if scalar(@$statuses) <= 1;
         }
-        $pm->finish(0, $all_statuses);
+        $pm->finish(0, $all_objects);
     }
     $pm->wait_all_children;
 
-    $self->logger->info('Got all '. scalar(@$user_ids). ' users, '. scalar(@$users_timeline). ' statuses.');
+    $self->logger->info('Got all '. scalar(@$user_ids). ' users, '. scalar(@{ $users_timeline->{tweets} }). ' tweets.');
 
     return $users_timeline;
 }
 
-sub _get_list_members {
-    my ($self, $list) = @_;
+sub _get_list_members_id {
+    my ($self, $list_id, $pagination_token) = @_;
 
-    $self->_logging_rate_limit_status();
+    my $pagination_param = defined($pagination_token) ? "&pagination_token=$pagination_token" : "";
+    my $list_members = $self->twitter->get("lists/$list_id/members?max_results=100$pagination_param")->{data};
+    my $members_id = [map { $_->{id} } @$list_members];
 
-    my $members = $self->twitter->list_members({list_id => $list, count => 5000})->{users};
-    my $member_ids = [map { $_->{id_str} } @$members];
+    $self->logger->info('Got '. scalar(@$members_id). ' members id.');
 
-    $self->logger->info('Got '. scalar(@$member_ids). ' members screen name.');
-
-    return $member_ids;
-}
-
-sub _logging_rate_limit_status {
-    my ($self) = @_;
-    my $limit = $self->twitter->rate_limit_status({resources => ['statuses', 'favorites', 'lists']})->{resources};
-    my $user_timeline_remaining = $limit->{statuses}{'/statuses/user_timeline'}{remaining};
-    my $favorites_remaining = $limit->{favorites}{'/favorites/list'}{remaining};
-    my $list_members_remaining = $limit->{lists}{'/lists/members'}{remaining};
-    $self->logger->info("Rate Limitting info: user_timeline: $user_timeline_remaining, favorites: $favorites_remaining, list_members: $list_members_remaining");
+    return $members_id;
 }
 
 sub _extract_file_name_and_url {
-    my ($self, $all_statuses, $min_followers_count) = @_;
-    my $rename_list = [];
+    my ($self, $all_objects) = @_;
     my $media_info = {};
-    for my $status (@$all_statuses) {
-        my $media_array = $status->{extended_entities}{media};
-        next unless $media_array;
-        $self->_notify_to_slack_if_not_read_yet($status, $min_followers_count) if $self->settings->{discord_webhook_url};
-        my $status_id = $media_array->[0]{source_status_id_str} ? $media_array->[0]{source_status_id_str} : $status->{id_str};
-        my $user_id = $status->{retweeted_status} ? $status->{retweeted_status}{user}{id_str} : $status->{user}{id_str};
-        if ($media_array->[0]{video_info}) {
-            my $video = $media_array->[0]{video_info}{variants};
-            for (@$video) { $_->{bitrate} = 0 unless $_->{bitrate} }
-            my $url = (sort { $b->{bitrate} <=> $a->{bitrate} } @$video)[0]{url};
-            $url =~ s/\?.+//;
-            my $old_filenames = [$status_id."-".basename($url), basename($url)];
-            my $filename = $user_id."-".$status_id."-".basename($url);
-            for my $old_filename (@$old_filenames) {
-                if (my $old_path = $self->stored_media_files->get($old_filename)) {
-                    my $new_path = dirname($old_path). "/$filename";
-                    rename $old_path, $new_path;
-                    $self->stored_media_files->del($old_filename);
-                    $self->stored_media_files->set($filename, $new_path);
-                    $self->logger->info("FILE MOVED! '$old_filename' TO '$filename'");
+    for my $media (@{ $all_objects->{media} }) {
+        my $author_id;
+        my $tweet_id;
+
+        for my $referenced_tweet (@{ $all_objects->{referenced_tweets} }) {
+            if (grep { $_ eq $media->{media_key} } @{ $referenced_tweet->{attachments}{media_keys} }) {
+                $author_id = $referenced_tweet->{author_id};
+                $tweet_id  = $referenced_tweet->{id};
+                last;
+            }
+        }
+        if (!defined($author_id) and !defined($tweet_id)) {
+            for my $tweet (@{ $all_objects->{tweets} }) {
+                if (grep { $_ eq $media->{media_key} } @{ $tweet->{attachments}{media_keys} }) {
+                    $author_id = $tweet->{author_id};
+                    $tweet_id  = $tweet->{id};
+                    last;
                 }
             }
+        }
+
+        if ($media->{type} eq 'photo') {
+            my $url = $media->{url};
+            my $filename = $author_id."-".$tweet_id."-".basename($url);
+            next if $self->stored_media_files->get($filename);
+            $media_info->{$filename} = $url. '?name=orig';
+        } elsif ($media->{type} eq 'video') {
+            my $video_variants = $media->{variants};
+            for my $video_variant (@$video_variants) { $video_variant->{bitrate} = 0 unless $video_variant->{bitrate} }
+            my $url = (sort { $b->{bitrate} <=> $a->{bitrate} } @$video_variants)[0]{url};
+            $url =~ s/\?.+//;
+            my $filename = $author_id."-".$tweet_id."-".basename($url);
             next if $self->stored_media_files->get($filename);
             $media_info->{$filename} = $url;
-        } else {
-            for my $media (@$media_array) {
-                my $url = $media->{media_url};
-                my $old_filenames = [$status_id."-".basename($url), basename($url)];
-                my $filename = $user_id."-".$status_id."-".basename($url);
-                for my $old_filename (@$old_filenames) {
-                    if (my $old_path = $self->stored_media_files->get($old_filename)) {
-                        my $new_path = dirname($old_path). "/$filename";
-                        rename $old_path, $new_path;
-                        $self->stored_media_files->del($old_filename);
-                        $self->stored_media_files->set($filename, $new_path);
-                        $self->logger->info("FILE MOVED! '$old_filename' TO '$filename'");
-                    }
-                }
-                next if $self->stored_media_files->get($filename);
-                $media_info->{$filename} = $url. '?name=orig';
-            }
         }
     }
 
     $self->logger->info('Extracted '. scalar(%$media_info). ' media files.');
-
     if ($self->redownload_list->dbsize > 0) {
         $media_info->{$_} = $self->redownload_list->get($_) for $self->redownload_list->keys('*');
     }
-
     return $media_info;
 }
 
 sub _notify_to_slack_if_not_read_yet {
-    my ($self, $status, $min_followers_count) = @_;
+    my ($self, $status) = @_;
     my $orig_status = $status->{retweeted_status} ? $status->{retweeted_status} : $status;
     my $user_id = $orig_status->{user}{id_str};
     my $user_screen_name = $orig_status->{user}{screen_name};
@@ -293,7 +298,6 @@ sub _notify_to_slack_if_not_read_yet {
     return if grep {$user_id eq $_} @{ $self->current_list_members };
     return if $self->stored_list_members->get($user_id);
     return if $self->read_members->get($user_id);
-    return if $orig_status->{user}{followers_count} < $min_followers_count;
 
     if ($self->settings->{discord_webhook_url}) {
         my $try = 0;
