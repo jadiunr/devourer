@@ -145,8 +145,10 @@ sub run {
         my $tweets = $self->_get_user_timelines($mediators_slice);
         push(@{ $tweets->{referenced_tweets} }, @{ $favs->{referenced_tweets} }) if $tweets->{referenced_tweets} and $favs->{referenced_tweets};
         push(@{ $tweets->{tweets} }, @{ $favs->{tweets} }) if $tweets->{tweets} and $favs->{tweets};
-        push(@{ $tweets->{users}  }, @{ $favs->{users} })  if $tweets->{users}  and $favs->{users};;
-        push(@{ $tweets->{media}  }, @{ $favs->{media} })  if $tweets->{media}  and $favs->{media};;
+        push(@{ $tweets->{users}  }, @{ $favs->{users} })  if $tweets->{users}  and $favs->{users};
+        push(@{ $tweets->{media}  }, @{ $favs->{media} })  if $tweets->{media}  and $favs->{media};
+        %{ $tweets->{referenced_tweets_hash_with_media_key} } = (%{ $tweets->{referenced_tweets_hash_with_media_key} }, %{ $favs->{referenced_tweets_hash_with_media_key} }) if $tweets->{referenced_tweets_hash_with_media_key} and $favs->{referenced_tweets_hash_with_media_key};
+        %{ $tweets->{tweets_hash_with_media_key} } = (%{ $tweets->{tweets_hash_with_media_key} }, %{ $favs->{tweets_hash_with_media_key} }) if $tweets->{tweets_hash_with_media_key} and $favs->{tweets_hash_with_media_key};
         my $media_urls = $self->_extract_file_name_and_url($tweets, 'mediators');
         $self->_download($media_urls);
         last unless @$mediators;
@@ -240,6 +242,36 @@ sub _v2_shaping {
     return $ret;
 }
 
+sub _add_author_and_tweet_id_to_media_objects {
+    my ($self, $tweets) = @_;
+
+    for my $media (@{ $tweets->{includes}{media} }) {
+        my $author_id;
+        my $tweet_id;
+        for my $referenced_tweet (@{ $tweets->{includes}{tweets} }) {
+            if (grep { $_ eq $media->{media_key} } @{ $referenced_tweet->{attachments}{media_keys} }) {
+                $author_id = $referenced_tweet->{author_id};
+                $tweet_id = $referenced_tweet->{id};
+                last
+            }
+        }
+        if (!defined($author_id) and !defined($tweet_id)) {
+            for my $tweet (@{ $tweets->{data} }) {
+                if (grep { $_ eq $media->{media_key} } @{ $tweet->{attachments}{media_keys} }) {
+                    $author_id = $tweet->{author_id};
+                    $tweet_id  = $tweet->{id};
+                    last;
+                }
+            }
+        }
+        next if !defined($author_id) and !defined($tweet_id);
+        $media->{author_id} = $author_id;
+        $media->{tweet_id} = $tweet_id;
+    }
+
+    return;
+}
+
 sub _get_user_favorites {
     my ($self, $user_id, $pagination_token) = @_;
 
@@ -277,6 +309,7 @@ sub _get_users_favorites {
             my $res = eval { $self->_get_user_favorites($user_id, $pagination_token) };
             last if $@;
             last unless $res->{data};
+            $self->_add_author_and_tweet_id_to_media_objects($res);
             push(@{ $all_objects->{tweets} }, @{ $res->{data} });
             push(@{ $all_objects->{referenced_tweets} }, @{ $res->{includes}{tweets} }) if $res->{includes}{tweets};
             push(@{ $all_objects->{users}  }, @{ $res->{includes}{users} })  if $res->{includes}{users};
@@ -344,6 +377,7 @@ sub _get_user_timelines {
             last if $@;
             last unless $res->{data};
             $tweets_count += scalar(@{ $res->{data} });
+            $self->_add_author_and_tweet_id_to_media_objects($res);
             push(@{ $all_objects->{tweets} }, @{ $res->{data} });
             push(@{ $all_objects->{referenced_tweets} }, @{ $res->{includes}{tweets} }) if $res->{includes}{tweets};
             push(@{ $all_objects->{users}  }, @{ $res->{includes}{users} })  if $res->{includes}{users};
@@ -399,24 +433,11 @@ sub _extract_file_name_and_url {
     my ($self, $all_objects, $fetched_from) = @_;
     my $media_info = {};
     for my $media (@{ $all_objects->{media} }) {
-        my $author_id;
-        my $tweet_id;
+        my $author_id = $media->{author_id};
+        my $tweet_id = $media->{tweet_id};
 
-        for my $referenced_tweet (@{ $all_objects->{referenced_tweets} }) {
-            if (grep { $_ eq $media->{media_key} } @{ $referenced_tweet->{attachments}{media_keys} }) {
-                $author_id = $referenced_tweet->{author_id};
-                $tweet_id  = $referenced_tweet->{id};
-                last;
-            }
-        }
-        if (!defined($author_id) and !defined($tweet_id)) {
-            for my $tweet (@{ $all_objects->{tweets} }) {
-                if (grep { $_ eq $media->{media_key} } @{ $tweet->{attachments}{media_keys} }) {
-                    $author_id = $tweet->{author_id};
-                    $tweet_id  = $tweet->{id};
-                    last;
-                }
-            }
+        if (!defined($author_id) or !defined($tweet_id)) {
+            $self->logger->warn('Could not found $author_id or $tweet_id in $media object. media_key='. $media->{media_key}) and next;
         }
 
         if ($fetched_from eq 'mediators') {
