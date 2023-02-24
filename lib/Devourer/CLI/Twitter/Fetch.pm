@@ -118,7 +118,7 @@ sub run {
             my $list_members_num = scalar(@$list_members_id);
             $total_list_members += $list_members_num;
             for (@$list_members_id) {
-                $self->all_list_members->set($_, 0);
+                $self->all_list_members->set($_, 0) unless $self->all_list_members->get($_);
             }
             $self->logger->info("Total $total_list_members members fetched from list $list_id ($list_name)");
         }
