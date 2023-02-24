@@ -4,6 +4,7 @@ use utf8;
 use Twitter::API;
 use YAML::Tiny;
 use Log::Dispatch;
+use Redis;
 
 has logger => (is => 'ro', default => sub {
     Log::Dispatch->new(
@@ -22,6 +23,11 @@ has twitter => (is => 'ro', lazy => 1, default => sub {
         access_token        => $self->settings->{twitter}{primary_credentials}{access_token},
         access_token_secret => $self->settings->{twitter}{primary_credentials}{access_token_secret}
     );
+});
+has all_list_members => (is => 'ro', default => sub {
+    my $redis = Redis->new(server => 'redis:6379');
+    $redis->select(1);
+    return $redis;
 });
 
 sub run {
@@ -51,10 +57,10 @@ sub run {
             $pagination_token = $res->{meta}{next_token};
         } else {
             $pagination_token = 0 unless defined($pagination_token);
-            my $res = $self->twitter->mutes({stringify_ids => '1', cursor => $next_cursor});
+            my $res = $self->twitter->mutes({stringify_ids => '1', cursor => $pagination_token});
             last unless $res->{ids};
             push(@$muted_users, @{ $res->{ids} });
-            last unless $res->{next_cursor_str}
+            last unless $res->{next_cursor_str};
             $pagination_token = $res->{next_cursor_str};
         }
     }
