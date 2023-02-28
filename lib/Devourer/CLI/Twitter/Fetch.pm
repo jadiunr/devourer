@@ -131,7 +131,10 @@ sub run {
         my $tweets = $self->_get_user_timelines($list_members->[1]);
         my $media_urls = $self->_extract_file_name_and_url($tweets, 'list_members');
         $self->_download($media_urls);
-        $self->all_list_members->set($_, 1) for @{ $list_members->[1] };
+        for my $list_member_id (@{ $list_members->[1] }) {
+            my $fetch_count = $self->all_list_members->get($list_member_id);
+            $self->all_list_members->set($list_member_id, $fetch_count + 1);
+        }
         last if $list_members->[0] eq "0";
         $count = $list_members->[0];
     }
@@ -370,7 +373,7 @@ sub _get_user_timelines {
         my $pagination_token;
         my $user_name = $self->_get_user_screen_name($user_id);
         last unless $user_name;
-        my $is_full_read_already = $self->all_list_members->get($user_id);
+        my $fetch_count = $self->all_list_members->get($user_id);
         my $tweets_count = 0;
         while (1) {
             my $res = eval { $self->_get_user_timeline($user_id, $pagination_token) };
@@ -385,12 +388,15 @@ sub _get_user_timelines {
             last unless $res->{meta}{next_token};
             $pagination_token = $res->{meta}{next_token};
             my $oldest_id = $res->{meta}{oldest_id};
-            if ($is_full_read_already) {
-                last if $tweets_count >= 200;
-                $self->logger->info("Got $user_name ($user_id)'s tweets. Next start with oldest_id=$oldest_id");
+            if ($fetch_count == 0) {
+                $self->logger->info("Got $user_name ($user_id)'s tweets. Current tweets count: $tweets_count, Limit: inf");
+            } elsif ($fetch_count <= 8) {
+                my $limit = 3200 / $fetch_count;
+                last if $tweets_count >= $limit;
+                $self->logger->info("Got $user_name ($user_id)'s tweets. Current tweets count: $tweets_count, Limit: $limit");
             } else {
-                last if $tweets_count >= 3200;
-                $self->logger->info("Got $user_name ($user_id)'s tweets. Next start with oldest_id=$oldest_id");
+                last if $tweets_count >= 200;
+                $self->logger->info("Got $user_name ($user_id)'s tweets. Current tweets count: $tweets_count, Limit: 200");
             }
         }
         $pm->finish(0, $all_objects);
